@@ -10,9 +10,13 @@ EXCLUDED_PATTERNS: tuple[str, ...] = (
     "*/.claude/projects/*",
     "*/.claude/.credentials.json",
     # SSH / cloud credentials
+    "*/.ssh",
     "*/.ssh/*",
+    "*/.aws",
     "*/.aws/*",
+    "*/.gnupg",
     "*/.gnupg/*",
+    "*/.config/gh",
     "*/.config/gh/*",
     # Secrets in any dir
     "*/.env",
