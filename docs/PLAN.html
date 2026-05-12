@@ -1,0 +1,2069 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>scope — Implementation Plan</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2128;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --amber: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 48px 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.65;
+    min-height: 100vh;
+  }
+  .container { max-width: 880px; margin: 0 auto; }
+  .header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+  }
+  .header .title {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 36px;
+    color: var(--accent);
+    margin: 0 0 4px 0;
+    letter-spacing: -1px;
+  }
+  .header .subtitle { color: var(--muted); font-size: 14px; margin: 4px 0; }
+  .meta { display: flex; gap: 24px; margin-top: 16px; font-size: 13px; color: var(--muted); }
+  .meta strong { color: var(--text); font-weight: 500; }
+  h1 { color: var(--text); font-size: 24px; margin-top: 56px; padding-bottom: 8px; border-bottom: 1px solid var(--border); font-weight: 600; }
+  h2 { color: var(--text); font-size: 18px; margin-top: 32px; font-weight: 600; }
+  h3 { color: var(--text); font-size: 16px; margin-top: 24px; font-weight: 600; }
+  p, li { color: var(--text); }
+  ul, ol { padding-left: 24px; }
+  li { margin: 4px 0; }
+  code {
+    background: var(--panel); color: var(--accent); padding: 2px 6px; border-radius: 4px;
+    border: 1px solid var(--border); font-size: 13px; font-family: ui-monospace, monospace;
+  }
+  pre {
+    background: var(--panel); border: 1px solid var(--border); padding: 16px 20px;
+    overflow-x: auto; border-radius: 6px; font-size: 13px; line-height: 1.5;
+  }
+  pre code { background: transparent; border: none; padding: 0; color: var(--text); }
+  table {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; overflow: hidden; font-size: 14px;
+  }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; background: var(--panel-2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  tr:last-child td { border-bottom: none; }
+  td { color: var(--text); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; letter-spacing: 0.3px; }
+  .badge-draft { background: rgba(210, 153, 34, 0.15); color: var(--amber); border: 1px solid rgba(210, 153, 34, 0.3); }
+  .badge-good { background: rgba(63, 185, 80, 0.15); color: var(--green); border: 1px solid rgba(63, 185, 80, 0.3); }
+  .badge-bad { background: rgba(248, 81, 73, 0.15); color: var(--red); border: 1px solid rgba(248, 81, 73, 0.3); }
+  .badge-new { background: rgba(188, 140, 255, 0.15); color: var(--purple); border: 1px solid rgba(188, 140, 255, 0.3); }
+  .callout {
+    background: var(--panel); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent); padding: 14px 18px;
+    margin: 16px 0; border-radius: 4px;
+  }
+  .callout.warn { border-left-color: var(--amber); }
+  .callout.danger { border-left-color: var(--red); }
+  .callout.good { border-left-color: var(--green); }
+  .toc {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 16px 24px; margin: 24px 0 40px 0;
+  }
+  .toc strong { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .toc ol { padding-left: 20px; margin: 8px 0 0 0; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+  .footer { text-align: center; color: var(--muted); margin-top: 64px; font-size: 12px; }
+  .arch-diagram {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 20px; font-family: ui-monospace, monospace; font-size: 12px;
+    line-height: 1.5; white-space: pre; overflow-x: auto; margin: 16px 0;
+  }
+  .phase {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 16px 20px; margin: 12px 0;
+  }
+  .phase .phase-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .phase .phase-num { color: var(--accent); font-weight: 600; font-family: ui-monospace, monospace; font-size: 14px; }
+  .phase .phase-time { color: var(--muted); font-size: 12px; }
+  .phase ul { margin: 8px 0; }
+  .phase .verify { color: var(--green); font-size: 13px; margin-top: 8px; font-style: italic; }
+  .changelog {
+    background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--purple);
+    padding: 12px 18px; margin: 16px 0; border-radius: 4px; font-size: 13px;
+  }
+  .changelog strong { color: var(--purple); }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <h1 class="title">scope</h1>
+  <div class="subtitle">Implementation Plan · v1</div>
+  <div class="meta">
+    <div><strong>Status:</strong> <span class="badge badge-good">COMPLETE</span></div>
+    <div><strong>Owner:</strong> Jake Fassora</div>
+    <div><strong>Date:</strong> 2026-05-12</div>
+  </div>
+</div>
+
+<h1>scope v1 Implementation Plan</h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Build a read-only local browser app that visualizes Claude Code config state and the user's git portfolio, with a deterministic rules engine for plain-English insights — zero LLM dependency in v1.</p>
+<p><strong>Architecture:</strong> Python 3.11 + Flask 3.x backend serving JSON to a vanilla-JS single-page UI on <code>127.0.0.1:8765</code>. Eight small Python modules under <code>scope/</code>, each with a single responsibility. Filesystem reads gated by a hard-coded deny list; all file contents passed through regex secret redaction before reaching the browser.</p>
+<p><strong>Tech Stack:</strong> Python 3.11+, Flask 3.x, GitPython 3.x, psutil 5.x, tiktoken, pytest 8.x, vanilla JS + CSS (no build step).</p>
+<p><strong>Spec source:</strong> <code>/Users/jakefassora/projects/scope/PRD.md</code> (v1.1, 2026-05-12).</p>
+<hr />
+<h2>File Structure</h2>
+<pre><code>~/projects/scope/
+├── README.md                              # short setup + attribution
+├── PRD.md                                 # exists; spec
+├── .gitignore
+├── requirements.txt
+├── app.py                                 # Flask entrypoint, all routes
+├── scope/
+│   ├── __init__.py
+│   ├── exclusions.py                      # hard deny list
+│   ├── redact.py                          # secret regex masking
+│   ├── token_estimator.py                 # bytes → tokens estimate
+│   ├── config_scanner.py                  # walks ~/.claude/, finds CLAUDE.md
+│   ├── file_browser.py                    # on-demand dir walker
+│   ├── process_scanner.py                 # finds running claude processes
+│   ├── git_scanner.py                     # per-repo git status
+│   └── rules.py                           # deterministic insight rules
+├── templates/
+│   └── index.html                         # single-page UI
+├── static/
+│   ├── style.css                          # dark theme
+│   └── app.js                             # fetch + render
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py                        # shared fixtures
+│   ├── test_exclusions.py
+│   ├── test_redact.py
+│   ├── test_token_estimator.py
+│   ├── test_config_scanner.py
+│   ├── test_file_browser.py
+│   ├── test_process_scanner.py
+│   ├── test_git_scanner.py
+│   └── test_rules.py
+└── docs/
+    ├── PRD.html                           # exists
+    └── superpowers/plans/2026-05-12-scope-v1.md   # this file
+</code></pre>
+<p><strong>Boundary notes:</strong>
+- <code>app.py</code> owns HTTP layer only — never touches the filesystem directly; always goes through a <code>scope/*.py</code> module.
+- <code>scope/exclusions.py</code> and <code>scope/redact.py</code> are pure-function modules; all other scanners depend on them.
+- No module under <code>scope/</code> imports Flask. Keep them library-shaped so they could be reused from a CLI later.</p>
+<hr />
+<h2>Phase 0 — Scaffold</h2>
+<h3>Task 0.1: Create directory structure and .gitignore</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/.gitignore</code>
+- Create: <code>/Users/jakefassora/projects/scope/scope/__init__.py</code>
+- Create: <code>/Users/jakefassora/projects/scope/tests/__init__.py</code>
+- Create: <code>/Users/jakefassora/projects/scope/templates/</code> (empty dir, with <code>.gitkeep</code>)
+- Create: <code>/Users/jakefassora/projects/scope/static/</code> (empty dir, with <code>.gitkeep</code>)</p>
+<ul>
+<li>[ ] <strong>Step 1: Create directories</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">mkdir -p /Users/jakefassora/projects/scope/scope
+mkdir -p /Users/jakefassora/projects/scope/tests
+mkdir -p /Users/jakefassora/projects/scope/templates
+mkdir -p /Users/jakefassora/projects/scope/static
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Write .gitignore</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/.gitignore</code>:</p>
+<pre><code>__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+scope.log
+.DS_Store
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Write package <strong>init</strong> files</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/scope/__init__.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;scope — read-only local visualizer for Claude Code config and git state.&quot;&quot;&quot;
+
+__version__ = &quot;0.1.0&quot;
+</code></pre>
+<p>Create <code>/Users/jakefassora/projects/scope/tests/__init__.py</code> as empty file.</p>
+<ul>
+<li>[ ] <strong>Step 4: Verify structure</strong></li>
+</ul>
+<p>Run: <code>find /Users/jakefassora/projects/scope -type d -not -path '*/\.*' | sort</code></p>
+<p>Expected output:</p>
+<pre><code>/Users/jakefassora/projects/scope
+/Users/jakefassora/projects/scope/docs
+/Users/jakefassora/projects/scope/docs/superpowers
+/Users/jakefassora/projects/scope/docs/superpowers/plans
+/Users/jakefassora/projects/scope/scope
+/Users/jakefassora/projects/scope/static
+/Users/jakefassora/projects/scope/templates
+/Users/jakefassora/projects/scope/tests
+</code></pre>
+<h3>Task 0.2: Create requirements.txt</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/requirements.txt</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write requirements.txt</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/requirements.txt</code>:</p>
+<pre><code>Flask==3.0.3
+GitPython==3.1.43
+psutil==5.9.8
+tiktoken==0.7.0
+pytest==8.2.0
+pytest-cov==5.0.0
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Create venv and install</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">cd /Users/jakefassora/projects/scope
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+</code></pre>
+<p>Expected: Installation completes without errors.</p>
+<ul>
+<li>[ ] <strong>Step 3: Verify installation</strong></li>
+</ul>
+<p>Run: <code>source /Users/jakefassora/projects/scope/.venv/bin/activate &amp;&amp; python -c "import flask, git, psutil, tiktoken, pytest; print('ok')"</code></p>
+<p>Expected: <code>ok</code></p>
+<h3>Task 0.3: Create minimal app.py with hello endpoint</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/app.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write app.py</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/app.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;scope — Flask entrypoint.&quot;&quot;&quot;
+from flask import Flask, jsonify
+
+app = Flask(__name__, static_folder=&quot;static&quot;, template_folder=&quot;templates&quot;)
+
+
+@app.get(&quot;/health&quot;)
+def health():
+    return jsonify({&quot;status&quot;: &quot;ok&quot;, &quot;name&quot;: &quot;scope&quot;, &quot;version&quot;: &quot;0.1.0&quot;})
+
+
+@app.get(&quot;/&quot;)
+def root():
+    return &quot;&lt;h1&gt;scope is alive&lt;/h1&gt;&lt;p&gt;Visit /health for status.&lt;/p&gt;&quot;
+
+
+if __name__ == &quot;__main__&quot;:
+    app.run(host=&quot;127.0.0.1&quot;, port=8765, debug=True)
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run the server</strong></li>
+</ul>
+<p>Run (in one terminal):</p>
+<pre><code class="language-bash">cd /Users/jakefassora/projects/scope
+source .venv/bin/activate
+python app.py
+</code></pre>
+<p>Expected: Flask boots, logs <code>Running on http://127.0.0.1:8765</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Verify in another terminal</strong></li>
+</ul>
+<p>Run: <code>curl -s http://127.0.0.1:8765/health</code></p>
+<p>Expected: <code>{"name":"scope","status":"ok","version":"0.1.0"}</code></p>
+<p>Stop the server with <code>Ctrl+C</code>.</p>
+<h3>Task 0.4: Initialize git and first commit</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/.git/</code> (via <code>git init</code>)</p>
+<ul>
+<li>[ ] <strong>Step 1: Initialize repo</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">cd /Users/jakefassora/projects/scope
+git init
+git branch -M main
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Stage and commit</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">git add .gitignore requirements.txt app.py scope/ tests/ templates/ static/ PRD.md docs/
+git commit -m &quot;chore: scaffold scope project with Flask hello-world&quot;
+</code></pre>
+<p>Expected: Commit succeeds with several files added.</p>
+<ul>
+<li>[ ] <strong>Step 3: Verify clean status</strong></li>
+</ul>
+<p>Run: <code>git status</code></p>
+<p>Expected: <code>nothing to commit, working tree clean</code>.</p>
+<hr />
+<h2>Phase 1 — Safety Layer (exclusions, redact, token_estimator)</h2>
+<p>These three modules are pure functions with zero filesystem dependencies. We TDD them first so every scanner built on top is safe by construction.</p>
+<h3>Task 1.1: Write tests for exclusions.py</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/tests/test_exclusions.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write failing tests</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/tests/test_exclusions.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Tests for scope.exclusions — hard deny list.&quot;&quot;&quot;
+from pathlib import Path
+import pytest
+from scope.exclusions import is_excluded, EXCLUDED_PATTERNS
+
+
+def test_session_transcripts_dir_excluded():
+    assert is_excluded(Path.home() / &quot;.claude&quot; / &quot;projects&quot; / &quot;abc&quot; / &quot;session.jsonl&quot;)
+
+
+def test_credentials_json_excluded():
+    assert is_excluded(Path.home() / &quot;.claude&quot; / &quot;.credentials.json&quot;)
+
+
+def test_ssh_dir_excluded():
+    assert is_excluded(Path.home() / &quot;.ssh&quot; / &quot;id_rsa&quot;)
+
+
+def test_aws_dir_excluded():
+    assert is_excluded(Path.home() / &quot;.aws&quot; / &quot;credentials&quot;)
+
+
+def test_gnupg_dir_excluded():
+    assert is_excluded(Path.home() / &quot;.gnupg&quot; / &quot;private-keys-v1.d&quot;)
+
+
+def test_env_file_excluded():
+    assert is_excluded(Path(&quot;/tmp/.env&quot;))
+    assert is_excluded(Path(&quot;/tmp/.env.local&quot;))
+
+
+def test_pem_file_excluded():
+    assert is_excluded(Path(&quot;/tmp/cert.pem&quot;))
+
+
+def test_id_rsa_excluded():
+    assert is_excluded(Path(&quot;/tmp/id_rsa&quot;))
+    assert is_excluded(Path(&quot;/tmp/id_rsa.pub&quot;))
+
+
+def test_normal_claude_md_not_excluded():
+    assert not is_excluded(Path.home() / &quot;projects&quot; / &quot;foo&quot; / &quot;CLAUDE.md&quot;)
+
+
+def test_normal_settings_json_not_excluded():
+    assert not is_excluded(Path.home() / &quot;.claude&quot; / &quot;settings.json&quot;)
+
+
+def test_patterns_constant_is_immutable_tuple():
+    assert isinstance(EXCLUDED_PATTERNS, tuple)
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests, verify they fail</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">cd /Users/jakefassora/projects/scope
+source .venv/bin/activate
+pytest tests/test_exclusions.py -v
+</code></pre>
+<p>Expected: All tests FAIL with <code>ModuleNotFoundError: No module named 'scope.exclusions'</code> or similar.</p>
+<h3>Task 1.2: Implement exclusions.py</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/scope/exclusions.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Implement the module</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/scope/exclusions.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Hard-coded deny list — paths scope must NEVER read.
+
+Not configurable. Not a setting. Refusal happens here.
+&quot;&quot;&quot;
+from pathlib import Path
+from fnmatch import fnmatch
+
+EXCLUDED_PATTERNS: tuple[str, ...] = (
+    # Claude Code session transcripts and credentials
+    &quot;*/.claude/projects/*&quot;,
+    &quot;*/.claude/.credentials.json&quot;,
+    # SSH / cloud credentials
+    &quot;*/.ssh/*&quot;,
+    &quot;*/.aws/*&quot;,
+    &quot;*/.gnupg/*&quot;,
+    &quot;*/.config/gh/*&quot;,
+    # Secrets in any dir
+    &quot;*/.env&quot;,
+    &quot;*/.env.*&quot;,
+    &quot;*/id_rsa&quot;,
+    &quot;*/id_rsa.*&quot;,
+    &quot;*/*.pem&quot;,
+    &quot;*/*.key&quot;,
+    &quot;*/*.p12&quot;,
+)
+
+
+def is_excluded(path: Path) -&gt; bool:
+    &quot;&quot;&quot;Return True if `path` matches any deny-list pattern.
+
+    Compares against the absolute path string. Patterns use shell-glob syntax.
+    &quot;&quot;&quot;
+    s = str(path.resolve() if path.is_absolute() else path)
+    return any(fnmatch(s, pat) for pat in EXCLUDED_PATTERNS)
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests, verify they pass</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_exclusions.py -v</code></p>
+<p>Expected: All 11 tests PASS.</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">git add scope/exclusions.py tests/test_exclusions.py
+git commit -m &quot;feat(exclusions): hard deny list with unit tests&quot;
+</code></pre>
+<h3>Task 1.3: Write tests for redact.py</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/tests/test_redact.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write failing tests</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/tests/test_redact.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Tests for scope.redact — regex secret masking.&quot;&quot;&quot;
+from scope.redact import redact
+
+
+def test_anthropic_api_key_redacted():
+    s = &quot;API key: sk-ant-api03-abcdef1234567890abcdef1234567890abcdef1234567890abcdef&quot;
+    assert &quot;sk-ant-api03&quot; not in redact(s)
+    assert &quot;[REDACTED]&quot; in redact(s)
+
+
+def test_openai_key_redacted():
+    s = &quot;OPENAI=sk-proj-AbCdEf1234567890AbCdEf1234567890AbCdEf12&quot;
+    assert &quot;sk-proj-AbCdEf&quot; not in redact(s)
+
+
+def test_github_pat_redacted():
+    s = &quot;token=ghp_AbCdEf1234567890AbCdEf1234567890AbCd&quot;
+    assert &quot;ghp_&quot; not in redact(s)
+
+
+def test_aws_access_key_redacted():
+    s = &quot;AKIAIOSFODNN7EXAMPLE&quot;
+    assert &quot;AKIA&quot; not in redact(s)
+
+
+def test_slack_bot_token_redacted():
+    s = &quot;xoxb-1234567890-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx&quot;
+    assert &quot;xoxb-&quot; not in redact(s)
+
+
+def test_jwt_redacted():
+    s = &quot;Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdef&quot;
+    assert &quot;eyJhbGci&quot; not in redact(s)
+
+
+def test_normal_text_unchanged():
+    s = &quot;This is a normal CLAUDE.md file with no secrets.&quot;
+    assert redact(s) == s
+
+
+def test_empty_string_safe():
+    assert redact(&quot;&quot;) == &quot;&quot;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Verify tests fail</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_redact.py -v</code></p>
+<p>Expected: All tests FAIL (module missing).</p>
+<h3>Task 1.4: Implement redact.py</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/scope/redact.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Implement redact</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/scope/redact.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Regex-based secret redaction.
+
+Defense in depth. Even though scope's deny list blocks high-risk files,
+project-level CLAUDE.md or git metadata could contain pasted tokens.
+Run every string heading to the browser through `redact()` first.
+&quot;&quot;&quot;
+import re
+
+_PATTERNS: tuple[re.Pattern, ...] = (
+    re.compile(r&quot;sk-ant-[a-zA-Z0-9_\-]{20,}&quot;),       # Anthropic
+    re.compile(r&quot;sk-proj-[a-zA-Z0-9_\-]{20,}&quot;),       # OpenAI project
+    re.compile(r&quot;sk-[a-zA-Z0-9_\-]{20,}&quot;),            # generic OpenAI-style
+    re.compile(r&quot;ghp_[a-zA-Z0-9]{20,}&quot;),              # GitHub PAT (classic)
+    re.compile(r&quot;github_pat_[a-zA-Z0-9_]{20,}&quot;),      # GitHub PAT (fine-grained)
+    re.compile(r&quot;AKIA[0-9A-Z]{16}&quot;),                  # AWS access key
+    re.compile(r&quot;xox[baprs]-[a-zA-Z0-9\-]{10,}&quot;),     # Slack tokens
+    re.compile(r&quot;eyJ[a-zA-Z0-9_\-]{10,}\.[a-zA-Z0-9_\-]{10,}\.[a-zA-Z0-9_\-]{10,}&quot;),  # JWT
+)
+
+
+def redact(text: str) -&gt; str:
+    &quot;&quot;&quot;Replace any matched secret pattern with `[REDACTED]`.&quot;&quot;&quot;
+    if not text:
+        return text
+    out = text
+    for pat in _PATTERNS:
+        out = pat.sub(&quot;[REDACTED]&quot;, out)
+    return out
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests, verify pass</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_redact.py -v</code></p>
+<p>Expected: All 8 tests PASS.</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">git add scope/redact.py tests/test_redact.py
+git commit -m &quot;feat(redact): regex secret masking with unit tests&quot;
+</code></pre>
+<h3>Task 1.5: Write tests for token_estimator.py</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/tests/test_token_estimator.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write tests</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/tests/test_token_estimator.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Tests for scope.token_estimator.&quot;&quot;&quot;
+from scope.token_estimator import estimate_tokens, estimate_tokens_from_bytes
+
+
+def test_empty_string_zero_tokens():
+    assert estimate_tokens(&quot;&quot;) == 0
+
+
+def test_short_string_returns_positive():
+    assert estimate_tokens(&quot;hello world&quot;) &gt; 0
+
+
+def test_longer_string_more_tokens():
+    short = estimate_tokens(&quot;hi&quot;)
+    long = estimate_tokens(&quot;hi &quot; * 1000)
+    assert long &gt; short
+
+
+def test_from_bytes_roughly_chars_over_4():
+    # 4000 bytes ≈ 1000 tokens (rough heuristic)
+    assert 800 &lt;= estimate_tokens_from_bytes(4000) &lt;= 1200
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Verify tests fail</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_token_estimator.py -v</code></p>
+<p>Expected: FAIL (module missing).</p>
+<h3>Task 1.6: Implement token_estimator.py</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/scope/token_estimator.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Implement</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/scope/token_estimator.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Estimate token count for arbitrary text.
+
+Uses tiktoken's cl100k_base encoding as a reasonable proxy for
+Anthropic tokenization. Exact counts differ; this is for UI display only,
+never for billing or hard limits.
+&quot;&quot;&quot;
+import tiktoken
+
+_ENC = tiktoken.get_encoding(&quot;cl100k_base&quot;)
+
+
+def estimate_tokens(text: str) -&gt; int:
+    &quot;&quot;&quot;Return estimated token count for `text`.&quot;&quot;&quot;
+    if not text:
+        return 0
+    return len(_ENC.encode(text))
+
+
+def estimate_tokens_from_bytes(num_bytes: int) -&gt; int:
+    &quot;&quot;&quot;Fast estimate without reading the file. ~4 bytes per token heuristic.&quot;&quot;&quot;
+    return max(0, num_bytes // 4)
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests, verify pass</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_token_estimator.py -v</code></p>
+<p>Expected: All 4 tests PASS.</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">git add scope/token_estimator.py tests/test_token_estimator.py
+git commit -m &quot;feat(tokens): tiktoken-based estimator with unit tests&quot;
+</code></pre>
+<hr />
+<h2>Phase 2 — Config Scanner + UI Shell</h2>
+<h3>Task 2.1: Write tests for config_scanner</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/tests/conftest.py</code>
+- Create: <code>/Users/jakefassora/projects/scope/tests/test_config_scanner.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write shared fixtures</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/tests/conftest.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Shared pytest fixtures.&quot;&quot;&quot;
+import pytest
+from pathlib import Path
+
+
+@pytest.fixture
+def fake_home(tmp_path: Path) -&gt; Path:
+    &quot;&quot;&quot;Create a fake home dir layout for testing scanners.&quot;&quot;&quot;
+    (tmp_path / &quot;.claude&quot;).mkdir()
+    (tmp_path / &quot;.claude&quot; / &quot;CLAUDE.md&quot;).write_text(&quot;# Global prefs\n&quot;)
+    (tmp_path / &quot;.claude&quot; / &quot;settings.json&quot;).write_text('{&quot;theme&quot;:&quot;dark&quot;}')
+    (tmp_path / &quot;.claude&quot; / &quot;projects&quot;).mkdir()
+    (tmp_path / &quot;.claude&quot; / &quot;projects&quot; / &quot;session.jsonl&quot;).write_text(&quot;SECRET-TRANSCRIPT&quot;)
+
+    (tmp_path / &quot;projects&quot; / &quot;foo&quot;).mkdir(parents=True)
+    (tmp_path / &quot;projects&quot; / &quot;foo&quot; / &quot;CLAUDE.md&quot;).write_text(&quot;# Foo project\n&quot; * 100)
+
+    (tmp_path / &quot;.ssh&quot;).mkdir()
+    (tmp_path / &quot;.ssh&quot; / &quot;id_rsa&quot;).write_text(&quot;SECRET-KEY&quot;)
+
+    return tmp_path
+</code></pre>
+<p>Create <code>/Users/jakefassora/projects/scope/tests/test_config_scanner.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Tests for scope.config_scanner.&quot;&quot;&quot;
+from pathlib import Path
+from scope.config_scanner import scan_claude_dir, find_claude_md_files
+
+
+def test_scan_claude_dir_returns_files(fake_home: Path):
+    results = scan_claude_dir(fake_home / &quot;.claude&quot;)
+    paths = [r[&quot;path&quot;] for r in results]
+    assert str(fake_home / &quot;.claude&quot; / &quot;CLAUDE.md&quot;) in paths
+    assert str(fake_home / &quot;.claude&quot; / &quot;settings.json&quot;) in paths
+
+
+def test_scan_claude_dir_excludes_session_transcripts(fake_home: Path):
+    results = scan_claude_dir(fake_home / &quot;.claude&quot;)
+    paths = [r[&quot;path&quot;] for r in results]
+    assert not any(&quot;projects/session.jsonl&quot; in p for p in paths)
+
+
+def test_scan_claude_dir_includes_size_and_tokens(fake_home: Path):
+    results = scan_claude_dir(fake_home / &quot;.claude&quot;)
+    for r in results:
+        assert &quot;size_bytes&quot; in r
+        assert &quot;tokens_est&quot; in r
+        assert r[&quot;tokens_est&quot;] &gt;= 0
+
+
+def test_find_claude_md_files_walks_projects(fake_home: Path):
+    results = find_claude_md_files(fake_home / &quot;projects&quot;)
+    paths = [r[&quot;path&quot;] for r in results]
+    assert str(fake_home / &quot;projects&quot; / &quot;foo&quot; / &quot;CLAUDE.md&quot;) in paths
+
+
+def test_find_claude_md_skips_ssh_dir(fake_home: Path):
+    # Even if a CLAUDE.md somehow exists in .ssh, it must be skipped.
+    bad = fake_home / &quot;.ssh&quot; / &quot;CLAUDE.md&quot;
+    bad.write_text(&quot;# nope&quot;)
+    results = find_claude_md_files(fake_home)
+    paths = [r[&quot;path&quot;] for r in results]
+    assert str(bad) not in paths
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Verify tests fail</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_config_scanner.py -v</code></p>
+<p>Expected: FAIL (module missing).</p>
+<h3>Task 2.2: Implement config_scanner</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/scope/config_scanner.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Implement scanner</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/scope/config_scanner.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Walks ~/.claude/ and locates CLAUDE.md files across the user's home.
+
+Returns dicts with path, size, estimated tokens, last modified.
+All paths gated by `scope.exclusions.is_excluded`.
+&quot;&quot;&quot;
+from __future__ import annotations
+import os
+from pathlib import Path
+from datetime import datetime
+
+from scope.exclusions import is_excluded
+from scope.token_estimator import estimate_tokens_from_bytes
+
+
+def _describe(path: Path) -&gt; dict:
+    stat = path.stat()
+    return {
+        &quot;path&quot;: str(path),
+        &quot;name&quot;: path.name,
+        &quot;size_bytes&quot;: stat.st_size,
+        &quot;tokens_est&quot;: estimate_tokens_from_bytes(stat.st_size),
+        &quot;modified_iso&quot;: datetime.fromtimestamp(stat.st_mtime).isoformat(timespec=&quot;seconds&quot;),
+    }
+
+
+def scan_claude_dir(claude_dir: Path) -&gt; list[dict]:
+    &quot;&quot;&quot;Return one dict per file under `claude_dir`, respecting deny list.&quot;&quot;&quot;
+    if not claude_dir.exists():
+        return []
+    results: list[dict] = []
+    for dirpath, dirnames, filenames in os.walk(claude_dir, followlinks=False):
+        # Skip excluded subtrees early
+        dirnames[:] = [d for d in dirnames if not is_excluded(Path(dirpath) / d)]
+        for fname in filenames:
+            p = Path(dirpath) / fname
+            if is_excluded(p):
+                continue
+            try:
+                results.append(_describe(p))
+            except (OSError, PermissionError):
+                continue
+    return results
+
+
+def find_claude_md_files(root: Path) -&gt; list[dict]:
+    &quot;&quot;&quot;Find every `CLAUDE.md` under `root` (recursively), respecting deny list.&quot;&quot;&quot;
+    if not root.exists():
+        return []
+    results: list[dict] = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [d for d in dirnames if not is_excluded(Path(dirpath) / d)]
+        for fname in filenames:
+            if fname != &quot;CLAUDE.md&quot;:
+                continue
+            p = Path(dirpath) / fname
+            if is_excluded(p):
+                continue
+            try:
+                results.append(_describe(p))
+            except (OSError, PermissionError):
+                continue
+    return results
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_config_scanner.py -v</code></p>
+<p>Expected: All 5 tests PASS.</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add scope/config_scanner.py tests/test_config_scanner.py tests/conftest.py
+git commit -m &quot;feat(config-scanner): walk ~/.claude/ and find CLAUDE.md files&quot;
+</code></pre>
+<h3>Task 2.3: Add Flask routes for config</h3>
+<p><strong>Files:</strong>
+- Modify: <code>/Users/jakefassora/projects/scope/app.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Replace app.py contents</strong></li>
+</ul>
+<p>Rewrite <code>/Users/jakefassora/projects/scope/app.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;scope — Flask entrypoint.&quot;&quot;&quot;
+from pathlib import Path
+from flask import Flask, jsonify, render_template
+
+from scope.config_scanner import scan_claude_dir, find_claude_md_files
+
+app = Flask(__name__, static_folder=&quot;static&quot;, template_folder=&quot;templates&quot;)
+
+HOME = Path.home()
+
+
+@app.get(&quot;/health&quot;)
+def health():
+    return jsonify({&quot;status&quot;: &quot;ok&quot;, &quot;name&quot;: &quot;scope&quot;, &quot;version&quot;: &quot;0.1.0&quot;})
+
+
+@app.get(&quot;/api/config&quot;)
+def api_config():
+    &quot;&quot;&quot;Returns Claude config files + CLAUDE.md hierarchy.&quot;&quot;&quot;
+    claude_files = scan_claude_dir(HOME / &quot;.claude&quot;)
+    project_claude_md = find_claude_md_files(HOME / &quot;projects&quot;)
+    return jsonify({
+        &quot;claude_dir&quot;: claude_files,
+        &quot;project_claude_md&quot;: project_claude_md,
+    })
+
+
+@app.get(&quot;/&quot;)
+def root():
+    return render_template(&quot;index.html&quot;)
+
+
+if __name__ == &quot;__main__&quot;:
+    app.run(host=&quot;127.0.0.1&quot;, port=8765, debug=True)
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Smoke-test the route</strong></li>
+</ul>
+<p>In one terminal: <code>python app.py</code>
+In another: <code>curl -s http://127.0.0.1:8765/api/config | python -m json.tool | head -20</code></p>
+<p>Expected: JSON with <code>claude_dir</code> and <code>project_claude_md</code> arrays containing your real files.</p>
+<p>Stop the server.</p>
+<h3>Task 2.4: Build the index.html shell</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/templates/index.html</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write template</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/templates/index.html</code>:</p>
+<pre><code class="language-html">&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+  &lt;meta charset=&quot;utf-8&quot;&gt;
+  &lt;title&gt;scope&lt;/title&gt;
+  &lt;link rel=&quot;stylesheet&quot; href=&quot;{{ url_for('static', filename='style.css') }}&quot;&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;header&gt;
+    &lt;h1&gt;scope&lt;/h1&gt;
+    &lt;button id=&quot;refresh&quot;&gt;↻ Refresh&lt;/button&gt;
+  &lt;/header&gt;
+
+  &lt;section id=&quot;insights&quot; class=&quot;panel&quot;&gt;
+    &lt;h2&gt;Insights&lt;/h2&gt;
+    &lt;div id=&quot;insights-body&quot;&gt;Loading…&lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;nav class=&quot;tabs&quot;&gt;
+    &lt;button class=&quot;tab active&quot; data-tab=&quot;context&quot;&gt;Claude Context&lt;/button&gt;
+    &lt;button class=&quot;tab&quot; data-tab=&quot;browser&quot;&gt;File Browser&lt;/button&gt;
+    &lt;button class=&quot;tab&quot; data-tab=&quot;processes&quot;&gt;Processes&lt;/button&gt;
+    &lt;button class=&quot;tab&quot; data-tab=&quot;git&quot;&gt;Git State&lt;/button&gt;
+  &lt;/nav&gt;
+
+  &lt;section id=&quot;tab-context&quot; class=&quot;tab-panel active&quot;&gt;
+    &lt;h2&gt;Per-turn token budget&lt;/h2&gt;
+    &lt;div id=&quot;budget&quot;&gt;—&lt;/div&gt;
+    &lt;h2&gt;Global config (&lt;code&gt;~/.claude/&lt;/code&gt;)&lt;/h2&gt;
+    &lt;div id=&quot;claude-dir&quot;&gt;Loading…&lt;/div&gt;
+    &lt;h2&gt;Project CLAUDE.md files&lt;/h2&gt;
+    &lt;div id=&quot;project-md&quot;&gt;Loading…&lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;section id=&quot;tab-browser&quot; class=&quot;tab-panel&quot;&gt;&lt;p&gt;File browser (Phase 3).&lt;/p&gt;&lt;/section&gt;
+  &lt;section id=&quot;tab-processes&quot; class=&quot;tab-panel&quot;&gt;&lt;p&gt;Processes (Phase 3).&lt;/p&gt;&lt;/section&gt;
+  &lt;section id=&quot;tab-git&quot; class=&quot;tab-panel&quot;&gt;&lt;p&gt;Git state (Phase 4).&lt;/p&gt;&lt;/section&gt;
+
+  &lt;script src=&quot;{{ url_for('static', filename='app.js') }}&quot;&gt;&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+<h3>Task 2.5: Build static/style.css</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/static/style.css</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write CSS</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/static/style.css</code>:</p>
+<pre><code class="language-css">:root {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #7d8590;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --amber: #d29922;
+  --red: #f85149;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 24px;
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system, system-ui, sans-serif;
+  font-size: 14px; line-height: 1.5;
+}
+header {
+  display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 20px;
+}
+header h1 {
+  font-family: ui-monospace, monospace;
+  color: var(--accent); margin: 0; font-size: 28px;
+}
+button {
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px;
+}
+button:hover { border-color: var(--accent); }
+.panel {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; padding: 16px 20px; margin-bottom: 20px;
+}
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.tab {
+  background: transparent; border: none; border-bottom: 2px solid transparent;
+  padding: 10px 16px; color: var(--muted); border-radius: 0;
+}
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+h2 { font-size: 16px; margin-top: 24px; color: var(--muted); font-weight: 500;
+     text-transform: uppercase; letter-spacing: 0.5px; }
+code { background: var(--panel); padding: 2px 6px; border-radius: 4px;
+       font-family: ui-monospace, monospace; font-size: 12px; color: var(--accent); }
+.file-row {
+  display: grid; grid-template-columns: 1fr auto auto auto;
+  gap: 16px; padding: 8px 12px; border-bottom: 1px solid var(--border);
+  align-items: center; font-family: ui-monospace, monospace; font-size: 12px;
+}
+.file-row .badge {
+  padding: 2px 8px; border-radius: 12px; font-size: 11px;
+}
+.badge.auto { background: rgba(248,81,73,0.15); color: var(--red);
+              border: 1px solid rgba(248,81,73,0.3); }
+.badge.ondemand { background: rgba(63,185,80,0.15); color: var(--green);
+                  border: 1px solid rgba(63,185,80,0.3); }
+.budget {
+  font-size: 32px; font-family: ui-monospace, monospace; color: var(--accent);
+  margin: 8px 0 4px 0;
+}
+.budget-caption { color: var(--muted); font-size: 13px; }
+</code></pre>
+<h3>Task 2.6: Build static/app.js</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/static/app.js</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write the JS</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/static/app.js</code>:</p>
+<pre><code class="language-javascript">&quot;use strict&quot;;
+
+// Tab switching
+document.querySelectorAll(&quot;.tab&quot;).forEach(function(btn) {
+  btn.addEventListener(&quot;click&quot;, function() {
+    var name = btn.dataset.tab;
+    document.querySelectorAll(&quot;.tab&quot;).forEach(function(t) { t.classList.remove(&quot;active&quot;); });
+    document.querySelectorAll(&quot;.tab-panel&quot;).forEach(function(p) { p.classList.remove(&quot;active&quot;); });
+    btn.classList.add(&quot;active&quot;);
+    document.getElementById(&quot;tab-&quot; + name).classList.add(&quot;active&quot;);
+  });
+});
+
+function fmtBytes(n) {
+  if (n &lt; 1024) return n + &quot; B&quot;;
+  if (n &lt; 1024 * 1024) return (n / 1024).toFixed(1) + &quot; KB&quot;;
+  return (n / (1024 * 1024)).toFixed(1) + &quot; MB&quot;;
+}
+
+function renderFileRows(container, files, isAuto) {
+  container.innerHTML = &quot;&quot;;
+  if (!files.length) { container.textContent = &quot;(none found)&quot;; return; }
+  files.sort(function(a, b) { return b.tokens_est - a.tokens_est; });
+  files.forEach(function(f) {
+    var row = document.createElement(&quot;div&quot;);
+    row.className = &quot;file-row&quot;;
+    row.innerHTML =
+      &quot;&lt;span title=\&quot;&quot; + f.path + &quot;\&quot;&gt;&quot; + f.path.replace(/^.*\/(\.claude|projects)\//, &quot;$1/&quot;) + &quot;&lt;/span&gt;&quot; +
+      &quot;&lt;span class=\&quot;badge &quot; + (isAuto ? &quot;auto&quot; : &quot;ondemand&quot;) + &quot;\&quot;&gt;&quot; +
+        (isAuto ? &quot;AUTO&quot; : &quot;ON-DEMAND&quot;) + &quot;&lt;/span&gt;&quot; +
+      &quot;&lt;span&gt;&quot; + fmtBytes(f.size_bytes) + &quot;&lt;/span&gt;&quot; +
+      &quot;&lt;span&gt;~&quot; + f.tokens_est.toLocaleString() + &quot; tok&lt;/span&gt;&quot;;
+    container.appendChild(row);
+  });
+}
+
+function renderBudget(autoTokens) {
+  var el = document.getElementById(&quot;budget&quot;);
+  var pct = Math.min(100, Math.round((autoTokens / 25000) * 100));
+  el.innerHTML =
+    &quot;&lt;div class=\&quot;budget\&quot;&gt;~&quot; + autoTokens.toLocaleString() + &quot; tokens&lt;/div&gt;&quot; +
+    &quot;&lt;div class=\&quot;budget-caption\&quot;&gt;loaded on every turn — about &quot; + pct +
+    &quot;% of a typical response budget&lt;/div&gt;&quot;;
+}
+
+function loadAll() {
+  fetch(&quot;/api/config&quot;).then(function(r) { return r.json(); }).then(function(d) {
+    renderFileRows(document.getElementById(&quot;claude-dir&quot;), d.claude_dir, true);
+    renderFileRows(document.getElementById(&quot;project-md&quot;), d.project_claude_md, true);
+    var autoTokens = d.claude_dir.reduce(function(s, f) { return s + f.tokens_est; }, 0) +
+                     d.project_claude_md.reduce(function(s, f) { return s + f.tokens_est; }, 0);
+    renderBudget(autoTokens);
+  });
+}
+
+document.getElementById(&quot;refresh&quot;).addEventListener(&quot;click&quot;, loadAll);
+loadAll();
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Manual verification</strong></li>
+</ul>
+<p>Run: <code>python app.py</code>, open <code>http://127.0.0.1:8765</code> in browser.</p>
+<p>Expected: Page shows a list of <code>~/.claude/</code> files and any CLAUDE.md files under <code>~/projects/</code>, sorted largest-first, each with size + token estimate. Token budget at top.</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add app.py templates/ static/
+git commit -m &quot;feat(ui): Claude Context tab — config + CLAUDE.md hierarchy + budget&quot;
+</code></pre>
+<hr />
+<h2>Phase 3 — File Browser + Process Scanner</h2>
+<h3>Task 3.1: Write tests for file_browser</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/tests/test_file_browser.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write tests</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/tests/test_file_browser.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Tests for scope.file_browser.&quot;&quot;&quot;
+from pathlib import Path
+import pytest
+from scope.file_browser import list_dir
+
+
+def test_list_dir_returns_children(fake_home: Path):
+    items = list_dir(fake_home)
+    names = [i[&quot;name&quot;] for i in items]
+    assert &quot;.claude&quot; in names
+    assert &quot;projects&quot; in names
+
+
+def test_list_dir_marks_dirs_and_files(fake_home: Path):
+    items = list_dir(fake_home / &quot;projects&quot; / &quot;foo&quot;)
+    md = next(i for i in items if i[&quot;name&quot;] == &quot;CLAUDE.md&quot;)
+    assert md[&quot;is_dir&quot;] is False
+    assert md[&quot;size_bytes&quot;] &gt; 0
+
+
+def test_list_dir_refuses_excluded(fake_home: Path):
+    with pytest.raises(PermissionError):
+        list_dir(fake_home / &quot;.ssh&quot;)
+
+
+def test_list_dir_refuses_above_home(fake_home: Path, monkeypatch):
+    # Even if asked to list /, must refuse if it's not under HOME.
+    monkeypatch.setenv(&quot;HOME&quot;, str(fake_home))
+    with pytest.raises(PermissionError):
+        list_dir(Path(&quot;/etc&quot;))
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Verify failure</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_file_browser.py -v</code></p>
+<p>Expected: All tests FAIL (module missing).</p>
+<h3>Task 3.2: Implement file_browser</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/scope/file_browser.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write module</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/scope/file_browser.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;On-demand directory listing.
+
+Single-level (not recursive). Refuses paths outside HOME or matching
+the deny list. Symlinks not followed.
+&quot;&quot;&quot;
+from __future__ import annotations
+import os
+from pathlib import Path
+from datetime import datetime
+
+from scope.exclusions import is_excluded
+
+
+def _ensure_under_home(path: Path) -&gt; None:
+    home = Path.home().resolve()
+    resolved = path.resolve()
+    if home not in resolved.parents and resolved != home:
+        raise PermissionError(f&quot;path outside home: {path}&quot;)
+
+
+def list_dir(path: Path) -&gt; list[dict]:
+    &quot;&quot;&quot;Return one dict per immediate child of `path`. Single level only.&quot;&quot;&quot;
+    _ensure_under_home(path)
+    if is_excluded(path):
+        raise PermissionError(f&quot;excluded path: {path}&quot;)
+    if not path.exists() or not path.is_dir():
+        return []
+
+    items: list[dict] = []
+    try:
+        entries = list(os.scandir(path))
+    except (PermissionError, OSError):
+        return []
+
+    for entry in entries:
+        p = Path(entry.path)
+        if is_excluded(p):
+            continue
+        try:
+            stat = entry.stat(follow_symlinks=False)
+        except OSError:
+            continue
+        items.append({
+            &quot;name&quot;: entry.name,
+            &quot;path&quot;: str(p),
+            &quot;is_dir&quot;: entry.is_dir(follow_symlinks=False),
+            &quot;size_bytes&quot;: stat.st_size if entry.is_file(follow_symlinks=False) else 0,
+            &quot;modified_iso&quot;: datetime.fromtimestamp(stat.st_mtime).isoformat(timespec=&quot;seconds&quot;),
+        })
+    items.sort(key=lambda x: (not x[&quot;is_dir&quot;], x[&quot;name&quot;].lower()))
+    return items
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_file_browser.py -v</code></p>
+<p>Expected: All 4 tests PASS.</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add scope/file_browser.py tests/test_file_browser.py
+git commit -m &quot;feat(file-browser): on-demand directory listing with safety guards&quot;
+</code></pre>
+<h3>Task 3.3: Write tests for process_scanner</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/tests/test_process_scanner.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write tests using mocks</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/tests/test_process_scanner.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Tests for scope.process_scanner — uses psutil mocks.&quot;&quot;&quot;
+from unittest.mock import MagicMock, patch
+from scope.process_scanner import find_claude_processes
+
+
+def _make_proc(pid, name, cmdline, cwd, create_time=1700000000.0):
+    p = MagicMock()
+    p.info = {&quot;pid&quot;: pid, &quot;name&quot;: name, &quot;cmdline&quot;: cmdline,
+              &quot;cwd&quot;: cwd, &quot;create_time&quot;: create_time}
+    return p
+
+
+@patch(&quot;scope.process_scanner.psutil.process_iter&quot;)
+def test_finds_claude_process(mock_iter):
+    mock_iter.return_value = [
+        _make_proc(101, &quot;claude&quot;, [&quot;claude&quot;], &quot;/Users/foo/projects/x&quot;),
+        _make_proc(102, &quot;python&quot;, [&quot;python&quot;, &quot;app.py&quot;], &quot;/Users/foo&quot;),
+    ]
+    results = find_claude_processes()
+    assert len(results) == 1
+    assert results[0][&quot;pid&quot;] == 101
+    assert results[0][&quot;cwd&quot;] == &quot;/Users/foo/projects/x&quot;
+
+
+@patch(&quot;scope.process_scanner.psutil.process_iter&quot;)
+def test_empty_when_no_claude(mock_iter):
+    mock_iter.return_value = [_make_proc(102, &quot;python&quot;, [&quot;python&quot;], &quot;/tmp&quot;)]
+    assert find_claude_processes() == []
+
+
+@patch(&quot;scope.process_scanner.psutil.process_iter&quot;)
+def test_handles_access_denied(mock_iter):
+    import psutil
+    bad = MagicMock()
+    bad.info = MagicMock(side_effect=psutil.AccessDenied)
+    type(bad).info = property(lambda self: (_ for _ in ()).throw(psutil.AccessDenied()))
+    mock_iter.return_value = [bad]
+    # Should not crash.
+    assert find_claude_processes() == []
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Verify failure</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_process_scanner.py -v</code></p>
+<p>Expected: FAIL (module missing).</p>
+<h3>Task 3.4: Implement process_scanner</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/scope/process_scanner.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write module</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/scope/process_scanner.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Find running `claude` Code CLI processes.
+
+Reads only cmdline / cwd / create_time via psutil. Never reads memory
+or open files of other processes.
+&quot;&quot;&quot;
+from __future__ import annotations
+import time
+import psutil
+
+
+def find_claude_processes() -&gt; list[dict]:
+    &quot;&quot;&quot;Return dicts for each running process whose name == 'claude'.&quot;&quot;&quot;
+    results: list[dict] = []
+    for proc in psutil.process_iter([&quot;pid&quot;, &quot;name&quot;, &quot;cmdline&quot;, &quot;cwd&quot;, &quot;create_time&quot;]):
+        try:
+            info = proc.info
+            if info.get(&quot;name&quot;) != &quot;claude&quot;:
+                continue
+            results.append({
+                &quot;pid&quot;: info[&quot;pid&quot;],
+                &quot;cmdline&quot;: &quot; &quot;.join(info.get(&quot;cmdline&quot;) or []),
+                &quot;cwd&quot;: info.get(&quot;cwd&quot;) or &quot;&quot;,
+                &quot;uptime_sec&quot;: int(time.time() - info.get(&quot;create_time&quot;, time.time())),
+            })
+        except (psutil.NoSuchProcess, psutil.AccessDenied, KeyError):
+            continue
+    return results
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_process_scanner.py -v</code></p>
+<p>Expected: All 3 tests PASS.</p>
+<h3>Task 3.5: Wire file browser + processes into Flask</h3>
+<p><strong>Files:</strong>
+- Modify: <code>/Users/jakefassora/projects/scope/app.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Add routes</strong></li>
+</ul>
+<p>Replace <code>/Users/jakefassora/projects/scope/app.py</code> with:</p>
+<pre><code class="language-python">&quot;&quot;&quot;scope — Flask entrypoint.&quot;&quot;&quot;
+from pathlib import Path
+from flask import Flask, jsonify, render_template, request
+
+from scope.config_scanner import scan_claude_dir, find_claude_md_files
+from scope.file_browser import list_dir
+from scope.process_scanner import find_claude_processes
+
+app = Flask(__name__, static_folder=&quot;static&quot;, template_folder=&quot;templates&quot;)
+HOME = Path.home()
+
+
+@app.get(&quot;/health&quot;)
+def health():
+    return jsonify({&quot;status&quot;: &quot;ok&quot;, &quot;name&quot;: &quot;scope&quot;, &quot;version&quot;: &quot;0.1.0&quot;})
+
+
+@app.get(&quot;/api/config&quot;)
+def api_config():
+    return jsonify({
+        &quot;claude_dir&quot;: scan_claude_dir(HOME / &quot;.claude&quot;),
+        &quot;project_claude_md&quot;: find_claude_md_files(HOME / &quot;projects&quot;),
+    })
+
+
+@app.get(&quot;/api/browse&quot;)
+def api_browse():
+    raw = request.args.get(&quot;path&quot;, str(HOME))
+    try:
+        items = list_dir(Path(raw))
+        return jsonify({&quot;path&quot;: raw, &quot;items&quot;: items})
+    except PermissionError as e:
+        return jsonify({&quot;error&quot;: str(e)}), 403
+
+
+@app.get(&quot;/api/processes&quot;)
+def api_processes():
+    return jsonify({&quot;processes&quot;: find_claude_processes()})
+
+
+@app.get(&quot;/&quot;)
+def root():
+    return render_template(&quot;index.html&quot;)
+
+
+if __name__ == &quot;__main__&quot;:
+    app.run(host=&quot;127.0.0.1&quot;, port=8765, debug=True)
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Smoke test</strong></li>
+</ul>
+<p>Run server, then:</p>
+<pre><code class="language-bash">curl -s http://127.0.0.1:8765/api/browse?path=$HOME | python -m json.tool | head
+curl -s http://127.0.0.1:8765/api/processes
+</code></pre>
+<p>Expected: Browse returns list of children. Processes returns <code>{"processes": [...]}</code>.</p>
+<h3>Task 3.6: Add Browser + Processes UI</h3>
+<p><strong>Files:</strong>
+- Modify: <code>/Users/jakefassora/projects/scope/templates/index.html</code>
+- Modify: <code>/Users/jakefassora/projects/scope/static/app.js</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Update browser tab HTML</strong></li>
+</ul>
+<p>In <code>templates/index.html</code>, replace the line <code>&lt;section id="tab-browser" class="tab-panel"&gt;&lt;p&gt;File browser (Phase 3).&lt;/p&gt;&lt;/section&gt;</code> with:</p>
+<pre><code class="language-html">&lt;section id=&quot;tab-browser&quot; class=&quot;tab-panel&quot;&gt;
+  &lt;h2&gt;File Browser&lt;/h2&gt;
+  &lt;div id=&quot;browser-path&quot; class=&quot;panel&quot;&gt;Path: &lt;code id=&quot;browser-current&quot;&gt;~&lt;/code&gt;&lt;/div&gt;
+  &lt;div id=&quot;browser-list&quot;&gt;Loading…&lt;/div&gt;
+&lt;/section&gt;
+</code></pre>
+<p>Replace the processes line with:</p>
+<pre><code class="language-html">&lt;section id=&quot;tab-processes&quot; class=&quot;tab-panel&quot;&gt;
+  &lt;h2&gt;Active Claude Processes&lt;/h2&gt;
+  &lt;div id=&quot;processes-list&quot;&gt;Loading…&lt;/div&gt;
+&lt;/section&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Append JS for browser + processes</strong></li>
+</ul>
+<p>Append to <code>/Users/jakefassora/projects/scope/static/app.js</code>:</p>
+<pre><code class="language-javascript">var browserPath = null;
+
+function fmtUptime(sec) {
+  if (sec &lt; 60) return sec + &quot;s&quot;;
+  if (sec &lt; 3600) return Math.floor(sec / 60) + &quot;m&quot;;
+  if (sec &lt; 86400) return Math.floor(sec / 3600) + &quot;h&quot;;
+  return Math.floor(sec / 86400) + &quot;d&quot;;
+}
+
+function loadBrowse(path) {
+  fetch(&quot;/api/browse?path=&quot; + encodeURIComponent(path)).then(function(r) {
+    if (r.status === 403) return r.json().then(function(d) { throw new Error(d.error); });
+    return r.json();
+  }).then(function(d) {
+    browserPath = d.path;
+    document.getElementById(&quot;browser-current&quot;).textContent = d.path;
+    var ul = document.createElement(&quot;div&quot;);
+    var parent = d.path.replace(/\/[^/]+$/, &quot;&quot;);
+    if (parent &amp;&amp; parent !== d.path) {
+      var up = document.createElement(&quot;div&quot;);
+      up.className = &quot;file-row&quot;; up.style.cursor = &quot;pointer&quot;;
+      up.innerHTML = &quot;&lt;span&gt;📁 ../ (up)&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&quot;;
+      up.addEventListener(&quot;click&quot;, function() { loadBrowse(parent); });
+      ul.appendChild(up);
+    }
+    d.items.forEach(function(it) {
+      var row = document.createElement(&quot;div&quot;);
+      row.className = &quot;file-row&quot;;
+      if (it.is_dir) {
+        row.style.cursor = &quot;pointer&quot;;
+        row.addEventListener(&quot;click&quot;, function() { loadBrowse(it.path); });
+      }
+      row.innerHTML =
+        &quot;&lt;span&gt;&quot; + (it.is_dir ? &quot;📁 &quot; : &quot;📄 &quot;) + it.name + &quot;&lt;/span&gt;&quot; +
+        &quot;&lt;span&gt;&lt;/span&gt;&quot; +
+        &quot;&lt;span&gt;&quot; + (it.is_dir ? &quot;&quot; : fmtBytes(it.size_bytes)) + &quot;&lt;/span&gt;&quot; +
+        &quot;&lt;span&gt;&quot; + it.modified_iso.slice(0, 10) + &quot;&lt;/span&gt;&quot;;
+      ul.appendChild(row);
+    });
+    var container = document.getElementById(&quot;browser-list&quot;);
+    container.innerHTML = &quot;&quot;; container.appendChild(ul);
+  }).catch(function(err) {
+    document.getElementById(&quot;browser-list&quot;).textContent = &quot;Error: &quot; + err.message;
+  });
+}
+
+function loadProcesses() {
+  fetch(&quot;/api/processes&quot;).then(function(r) { return r.json(); }).then(function(d) {
+    var container = document.getElementById(&quot;processes-list&quot;);
+    if (!d.processes.length) {
+      container.innerHTML = &quot;&lt;p style='color:var(--muted)'&gt;No claude processes running.&lt;/p&gt;&quot;;
+      return;
+    }
+    container.innerHTML = &quot;&quot;;
+    d.processes.forEach(function(p) {
+      var row = document.createElement(&quot;div&quot;);
+      row.className = &quot;file-row&quot;;
+      row.innerHTML =
+        &quot;&lt;span&gt;PID &quot; + p.pid + &quot;&lt;/span&gt;&quot; +
+        &quot;&lt;span&gt;&quot; + p.cwd + &quot;&lt;/span&gt;&quot; +
+        &quot;&lt;span&gt;&lt;/span&gt;&quot; +
+        &quot;&lt;span&gt;up &quot; + fmtUptime(p.uptime_sec) + &quot;&lt;/span&gt;&quot;;
+      container.appendChild(row);
+    });
+  });
+}
+
+// Lazy-load tabs the first time they are opened
+document.querySelector(&quot;[data-tab='browser']&quot;).addEventListener(&quot;click&quot;, function() {
+  if (browserPath === null) loadBrowse(window.HOME_PATH || &quot;/Users/jakefassora&quot;);
+});
+document.querySelector(&quot;[data-tab='processes']&quot;).addEventListener(&quot;click&quot;, loadProcesses);
+</code></pre>
+<p>Note: hardcode HOME on the first load; we'll prefer a server-provided value later.</p>
+<ul>
+<li>[ ] <strong>Step 3: Provide HOME to the template</strong></li>
+</ul>
+<p>In <code>app.py</code>, modify the <code>root()</code> function:</p>
+<pre><code class="language-python">@app.get(&quot;/&quot;)
+def root():
+    return render_template(&quot;index.html&quot;, home_path=str(HOME))
+</code></pre>
+<p>In <code>templates/index.html</code>, just before <code>&lt;script src=...&gt;</code>, add:</p>
+<pre><code class="language-html">&lt;script&gt;window.HOME_PATH = &quot;{{ home_path }}&quot;;&lt;/script&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Manual verification</strong></li>
+</ul>
+<p>Restart server. Open browser. Click "File Browser" tab → see contents of <code>~</code>, click into a folder, click <code>..</code> to go up. Click "Processes" tab → see running claude processes (or empty state).</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add scope/file_browser.py scope/process_scanner.py tests/test_file_browser.py tests/test_process_scanner.py app.py templates/index.html static/app.js
+git commit -m &quot;feat(browser-processes): file browser tab + active claude process detection&quot;
+</code></pre>
+<hr />
+<h2>Phase 4 — Git Portfolio Scanner</h2>
+<h3>Task 4.1: Write tests for git_scanner</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/tests/test_git_scanner.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write tests using real tmp git repos</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/tests/test_git_scanner.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Tests for scope.git_scanner — uses real tmp git repos.&quot;&quot;&quot;
+import subprocess
+from pathlib import Path
+import pytest
+from scope.git_scanner import scan_repo, find_repos
+
+
+def _run(args, cwd):
+    subprocess.run(args, cwd=cwd, check=True, capture_output=True)
+
+
+@pytest.fixture
+def tmp_repo(tmp_path: Path) -&gt; Path:
+    &quot;&quot;&quot;A bare-bones git repo with one commit and one dirty file.&quot;&quot;&quot;
+    repo = tmp_path / &quot;myrepo&quot;
+    repo.mkdir()
+    _run([&quot;git&quot;, &quot;init&quot;, &quot;-b&quot;, &quot;main&quot;], cwd=repo)
+    _run([&quot;git&quot;, &quot;config&quot;, &quot;user.email&quot;, &quot;t@t.t&quot;], cwd=repo)
+    _run([&quot;git&quot;, &quot;config&quot;, &quot;user.name&quot;, &quot;t&quot;], cwd=repo)
+    (repo / &quot;a.txt&quot;).write_text(&quot;hi&quot;)
+    _run([&quot;git&quot;, &quot;add&quot;, &quot;a.txt&quot;], cwd=repo)
+    _run([&quot;git&quot;, &quot;commit&quot;, &quot;-m&quot;, &quot;initial&quot;], cwd=repo)
+    (repo / &quot;b.txt&quot;).write_text(&quot;dirty&quot;)  # untracked
+    return repo
+
+
+def test_scan_repo_reports_branch(tmp_repo: Path):
+    r = scan_repo(tmp_repo)
+    assert r[&quot;branch&quot;] == &quot;main&quot;
+
+
+def test_scan_repo_reports_untracked(tmp_repo: Path):
+    r = scan_repo(tmp_repo)
+    assert r[&quot;untracked&quot;] == 1
+
+
+def test_scan_repo_reports_clean_zero_dirty(tmp_repo: Path):
+    r = scan_repo(tmp_repo)
+    assert r[&quot;dirty&quot;] == 0
+
+
+def test_scan_repo_returns_last_commit_iso(tmp_repo: Path):
+    r = scan_repo(tmp_repo)
+    assert &quot;T&quot; in r[&quot;last_commit_iso&quot;]
+
+
+def test_find_repos_locates_subdir_repo(tmp_path: Path, tmp_repo: Path):
+    # tmp_repo is at tmp_path/myrepo; find_repos at tmp_path should find it.
+    found = find_repos(tmp_path)
+    paths = [r[&quot;path&quot;] for r in found]
+    assert str(tmp_repo) in paths
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Verify failure</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_git_scanner.py -v</code></p>
+<p>Expected: FAIL (module missing).</p>
+<h3>Task 4.2: Implement git_scanner</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/scope/git_scanner.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Implement scanner</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/scope/git_scanner.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Per-repo git status — uses GitPython.
+
+For each repo: branch, dirty/untracked counts, ahead/behind, stash count,
+worktree count, last commit ISO, staleness flag.
+&quot;&quot;&quot;
+from __future__ import annotations
+import os
+from pathlib import Path
+from datetime import datetime, timezone
+
+from git import Repo, InvalidGitRepositoryError, NoSuchPathError
+
+from scope.exclusions import is_excluded
+
+
+def _ahead_behind(repo: Repo) -&gt; tuple[int, int]:
+    try:
+        branch = repo.active_branch
+        tracking = branch.tracking_branch()
+        if tracking is None:
+            return (0, 0)
+        ahead = sum(1 for _ in repo.iter_commits(f&quot;{tracking}..{branch}&quot;))
+        behind = sum(1 for _ in repo.iter_commits(f&quot;{branch}..{tracking}&quot;))
+        return ahead, behind
+    except Exception:
+        return (0, 0)
+
+
+def scan_repo(path: Path) -&gt; dict:
+    &quot;&quot;&quot;Scan a single git repo at `path`. Raises if not a repo.&quot;&quot;&quot;
+    repo = Repo(path)
+    head = repo.head
+    branch_name = head.ref.name if not head.is_detached else &quot;(detached)&quot;
+
+    dirty = len([item for item in repo.index.diff(None)])  # modified, not staged
+    staged = len([item for item in repo.index.diff(&quot;HEAD&quot;)]) if not head.is_detached else 0
+    untracked = len(repo.untracked_files)
+    ahead, behind = _ahead_behind(repo)
+
+    try:
+        stash_count = len(repo.git.stash(&quot;list&quot;).splitlines()) if repo.git.stash(&quot;list&quot;) else 0
+    except Exception:
+        stash_count = 0
+
+    try:
+        worktree_count = len(repo.git.worktree(&quot;list&quot;).splitlines())
+    except Exception:
+        worktree_count = 1
+
+    last_commit = head.commit
+    last_commit_dt = datetime.fromtimestamp(last_commit.committed_date, tz=timezone.utc)
+    age_days = (datetime.now(tz=timezone.utc) - last_commit_dt).days
+
+    return {
+        &quot;path&quot;: str(path),
+        &quot;branch&quot;: branch_name,
+        &quot;dirty&quot;: dirty + staged,
+        &quot;untracked&quot;: untracked,
+        &quot;ahead&quot;: ahead,
+        &quot;behind&quot;: behind,
+        &quot;stash_count&quot;: stash_count,
+        &quot;worktree_count&quot;: worktree_count,
+        &quot;last_commit_iso&quot;: last_commit_dt.isoformat(timespec=&quot;seconds&quot;),
+        &quot;age_days&quot;: age_days,
+        &quot;stale&quot;: age_days &gt; 14 and (dirty + staged + untracked) &gt; 0,
+    }
+
+
+def find_repos(root: Path) -&gt; list[dict]:
+    &quot;&quot;&quot;Find git repos in immediate children of `root` and scan each.&quot;&quot;&quot;
+    if not root.exists():
+        return []
+    results: list[dict] = []
+    for entry in os.scandir(root):
+        if not entry.is_dir(follow_symlinks=False):
+            continue
+        p = Path(entry.path)
+        if is_excluded(p):
+            continue
+        try:
+            results.append(scan_repo(p))
+        except (InvalidGitRepositoryError, NoSuchPathError):
+            continue
+        except Exception:
+            continue
+    return results
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_git_scanner.py -v</code></p>
+<p>Expected: All 5 tests PASS.</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add scope/git_scanner.py tests/test_git_scanner.py
+git commit -m &quot;feat(git-scanner): per-repo status with branch/dirty/ahead/behind/worktrees&quot;
+</code></pre>
+<h3>Task 4.3: Add Flask route for git</h3>
+<p><strong>Files:</strong>
+- Modify: <code>/Users/jakefassora/projects/scope/app.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Add /api/git route</strong></li>
+</ul>
+<p>Add to <code>app.py</code> imports:</p>
+<pre><code class="language-python">from scope.git_scanner import find_repos
+</code></pre>
+<p>Add this route after <code>api_processes</code>:</p>
+<pre><code class="language-python">@app.get(&quot;/api/git&quot;)
+def api_git():
+    return jsonify({
+        &quot;projects&quot;: find_repos(HOME / &quot;projects&quot;),
+        &quot;worktrees&quot;: find_repos(HOME / &quot;.claude&quot; / &quot;worktrees&quot;),
+    })
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Smoke-test</strong></li>
+</ul>
+<p>Run server, then: <code>curl -s http://127.0.0.1:8765/api/git | python -m json.tool | head -40</code></p>
+<p>Expected: JSON listing every git repo under <code>~/projects/</code> with branch + status.</p>
+<h3>Task 4.4: Build Git State UI</h3>
+<p><strong>Files:</strong>
+- Modify: <code>/Users/jakefassora/projects/scope/templates/index.html</code>
+- Modify: <code>/Users/jakefassora/projects/scope/static/app.js</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Update Git tab HTML</strong></li>
+</ul>
+<p>In <code>templates/index.html</code>, replace the git section with:</p>
+<pre><code class="language-html">&lt;section id=&quot;tab-git&quot; class=&quot;tab-panel&quot;&gt;
+  &lt;h2&gt;Projects (&lt;code&gt;~/projects/&lt;/code&gt;)&lt;/h2&gt;
+  &lt;div id=&quot;git-projects&quot;&gt;Loading…&lt;/div&gt;
+  &lt;h2&gt;Active Worktrees (&lt;code&gt;~/.claude/worktrees/&lt;/code&gt;)&lt;/h2&gt;
+  &lt;div id=&quot;git-worktrees&quot;&gt;Loading…&lt;/div&gt;
+&lt;/section&gt;
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Append JS render</strong></li>
+</ul>
+<p>Append to <code>static/app.js</code>:</p>
+<pre><code class="language-javascript">function renderRepos(container, repos) {
+  container.innerHTML = &quot;&quot;;
+  if (!repos.length) { container.textContent = &quot;(none)&quot;; return; }
+  repos.sort(function(a, b) { return b.age_days - a.age_days; });
+  repos.forEach(function(r) {
+    var row = document.createElement(&quot;div&quot;);
+    row.className = &quot;file-row&quot;;
+    var summary = [];
+    if (r.dirty) summary.push(r.dirty + &quot; dirty&quot;);
+    if (r.untracked) summary.push(r.untracked + &quot; untracked&quot;);
+    if (r.ahead) summary.push(&quot;↑&quot; + r.ahead);
+    if (r.behind) summary.push(&quot;↓&quot; + r.behind);
+    if (r.stash_count) summary.push(r.stash_count + &quot; stash&quot;);
+    if (!summary.length) summary.push(&quot;clean&quot;);
+    var stalenessBadge = r.stale
+      ? &quot;&lt;span class=\&quot;badge auto\&quot;&gt;STALE&lt;/span&gt;&quot;
+      : &quot;&lt;span class=\&quot;badge ondemand\&quot;&gt;OK&lt;/span&gt;&quot;;
+    row.innerHTML =
+      &quot;&lt;span title=\&quot;&quot; + r.path + &quot;\&quot;&gt;&quot; + r.path.replace(/^.*\//, &quot;&quot;) +
+        &quot; &lt;code&gt;&quot; + r.branch + &quot;&lt;/code&gt;&lt;/span&gt;&quot; +
+      stalenessBadge +
+      &quot;&lt;span&gt;&quot; + summary.join(&quot;, &quot;) + &quot;&lt;/span&gt;&quot; +
+      &quot;&lt;span&gt;&quot; + r.age_days + &quot;d ago&lt;/span&gt;&quot;;
+    container.appendChild(row);
+  });
+}
+
+function loadGit() {
+  fetch(&quot;/api/git&quot;).then(function(r) { return r.json(); }).then(function(d) {
+    renderRepos(document.getElementById(&quot;git-projects&quot;), d.projects);
+    renderRepos(document.getElementById(&quot;git-worktrees&quot;), d.worktrees);
+  });
+}
+
+document.querySelector(&quot;[data-tab='git']&quot;).addEventListener(&quot;click&quot;, loadGit);
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Manual verification</strong></li>
+</ul>
+<p>Restart server. Click Git State tab. Verify every project repo + every active worktree shows with branch + status + staleness.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add app.py templates/index.html static/app.js
+git commit -m &quot;feat(git-ui): Git State tab with repos, worktrees, staleness&quot;
+</code></pre>
+<hr />
+<h2>Phase 5 — Rules Engine + Insights Panel + Polish</h2>
+<h3>Task 5.1: Write tests for rules</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/tests/test_rules.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write tests</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/tests/test_rules.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Tests for scope.rules — deterministic insight rules.&quot;&quot;&quot;
+from scope.rules import evaluate_all, Severity
+
+
+def _file(size_bytes=1000, age_days=1, path=&quot;/Users/j/projects/foo/CLAUDE.md&quot;, auto=True):
+    return {
+        &quot;path&quot;: path,
+        &quot;size_bytes&quot;: size_bytes,
+        &quot;tokens_est&quot;: size_bytes // 4,
+        &quot;age_days&quot;: age_days,
+        &quot;auto_loaded&quot;: auto,
+    }
+
+
+def _repo(dirty=0, untracked=0, ahead=0, age_days=1, path=&quot;/Users/j/projects/foo&quot;):
+    return {
+        &quot;path&quot;: path, &quot;branch&quot;: &quot;main&quot;, &quot;dirty&quot;: dirty, &quot;untracked&quot;: untracked,
+        &quot;ahead&quot;: ahead, &quot;behind&quot;: 0, &quot;stash_count&quot;: 0, &quot;worktree_count&quot;: 1,
+        &quot;age_days&quot;: age_days, &quot;stale&quot;: False,
+    }
+
+
+def test_auto_loaded_and_large_triggers_high():
+    findings = evaluate_all(
+        config_files=[_file(size_bytes=20000, auto=True)],
+        repos=[],
+        worktrees=[],
+        home_is_git_repo=False,
+    )
+    assert any(f[&quot;rule&quot;] == &quot;auto_loaded_and_large&quot; and f[&quot;severity&quot;] == Severity.HIGH
+               for f in findings)
+
+
+def test_stale_auto_loaded_triggers_med():
+    findings = evaluate_all(
+        config_files=[_file(age_days=60, auto=True)],
+        repos=[], worktrees=[], home_is_git_repo=False,
+    )
+    assert any(f[&quot;rule&quot;] == &quot;stale_auto_loaded&quot; for f in findings)
+
+
+def test_home_is_git_repo_triggers_high():
+    findings = evaluate_all(config_files=[], repos=[], worktrees=[], home_is_git_repo=True)
+    assert any(f[&quot;rule&quot;] == &quot;home_is_git_repo&quot; and f[&quot;severity&quot;] == Severity.HIGH
+               for f in findings)
+
+
+def test_orphaned_worktree_triggers_med():
+    wt = _repo(age_days=60)
+    findings = evaluate_all(config_files=[], repos=[], worktrees=[wt],
+                            home_is_git_repo=False)
+    assert any(f[&quot;rule&quot;] == &quot;orphaned_worktree&quot; for f in findings)
+
+
+def test_dirty_unpushed_stale_triggers_med():
+    r = _repo(dirty=2, ahead=3, age_days=14)
+    findings = evaluate_all(config_files=[], repos=[r], worktrees=[],
+                            home_is_git_repo=False)
+    assert any(f[&quot;rule&quot;] == &quot;dirty_unpushed_stale&quot; for f in findings)
+
+
+def test_clean_state_no_findings():
+    findings = evaluate_all(config_files=[], repos=[], worktrees=[],
+                            home_is_git_repo=False)
+    assert findings == []
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Verify failure</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_rules.py -v</code></p>
+<p>Expected: FAIL.</p>
+<h3>Task 5.2: Implement rules engine</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/scope/rules.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write module</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/scope/rules.py</code>:</p>
+<pre><code class="language-python">&quot;&quot;&quot;Deterministic insight rules.
+
+Each rule is a pure function over scanner output. Returns a list of
+findings; each finding has a rule name, severity, message, and target path.
+&quot;&quot;&quot;
+from __future__ import annotations
+from enum import Enum
+
+
+class Severity(str, Enum):
+    LOW = &quot;LOW&quot;
+    MED = &quot;MED&quot;
+    HIGH = &quot;HIGH&quot;
+
+
+def _r_auto_loaded_and_large(config_files: list[dict]) -&gt; list[dict]:
+    out = []
+    for f in config_files:
+        if f.get(&quot;auto_loaded&quot;) and f[&quot;size_bytes&quot;] &gt; 8 * 1024:
+            out.append({
+                &quot;rule&quot;: &quot;auto_loaded_and_large&quot;,
+                &quot;severity&quot;: Severity.HIGH,
+                &quot;target&quot;: f[&quot;path&quot;],
+                &quot;message&quot;: (
+                    f&quot;{f['path'].split('/')[-1]} is {f['size_bytes'] // 1024}KB and &quot;
+                    f&quot;loads every turn (~{f['tokens_est']:,} tokens). Consider pruning.&quot;
+                ),
+            })
+    return out
+
+
+def _r_stale_auto_loaded(config_files: list[dict]) -&gt; list[dict]:
+    out = []
+    for f in config_files:
+        if f.get(&quot;auto_loaded&quot;) and f.get(&quot;age_days&quot;, 0) &gt; 30:
+            out.append({
+                &quot;rule&quot;: &quot;stale_auto_loaded&quot;,
+                &quot;severity&quot;: Severity.MED,
+                &quot;target&quot;: f[&quot;path&quot;],
+                &quot;message&quot;: (
+                    f&quot;{f['path']} auto-loads but hasn't been edited in &quot;
+                    f&quot;{f['age_days']} days. Review for relevance.&quot;
+                ),
+            })
+    return out
+
+
+def _r_home_is_git_repo(home_is_git_repo: bool) -&gt; list[dict]:
+    if not home_is_git_repo:
+        return []
+    return [{
+        &quot;rule&quot;: &quot;home_is_git_repo&quot;,
+        &quot;severity&quot;: Severity.HIGH,
+        &quot;target&quot;: &quot;~&quot;,
+        &quot;message&quot;: (
+            &quot;Your home directory is itself a git repository. Every project file &quot;
+            &quot;you create may end up tracked. Consider moving the .git out.&quot;
+        ),
+    }]
+
+
+def _r_orphaned_worktree(worktrees: list[dict]) -&gt; list[dict]:
+    out = []
+    for w in worktrees:
+        if w.get(&quot;age_days&quot;, 0) &gt; 14:
+            out.append({
+                &quot;rule&quot;: &quot;orphaned_worktree&quot;,
+                &quot;severity&quot;: Severity.MED,
+                &quot;target&quot;: w[&quot;path&quot;],
+                &quot;message&quot;: (
+                    f&quot;Worktree at {w['path']} hasn't been touched in &quot;
+                    f&quot;{w['age_days']} days. Likely abandoned — consider removing.&quot;
+                ),
+            })
+    return out
+
+
+def _r_dirty_unpushed_stale(repos: list[dict]) -&gt; list[dict]:
+    out = []
+    for r in repos:
+        if r.get(&quot;dirty&quot;, 0) &gt; 0 and r.get(&quot;ahead&quot;, 0) &gt; 0 and r.get(&quot;age_days&quot;, 0) &gt; 7:
+            out.append({
+                &quot;rule&quot;: &quot;dirty_unpushed_stale&quot;,
+                &quot;severity&quot;: Severity.MED,
+                &quot;target&quot;: r[&quot;path&quot;],
+                &quot;message&quot;: (
+                    f&quot;{r['path']} has {r['dirty']} uncommitted change(s) and &quot;
+                    f&quot;{r['ahead']} commit(s) ahead of remote, untouched for &quot;
+                    f&quot;{r['age_days']} days. Work at risk.&quot;
+                ),
+            })
+    return out
+
+
+def evaluate_all(
+    config_files: list[dict],
+    repos: list[dict],
+    worktrees: list[dict],
+    home_is_git_repo: bool,
+) -&gt; list[dict]:
+    &quot;&quot;&quot;Run all rules and return the combined findings.&quot;&quot;&quot;
+    findings: list[dict] = []
+    findings.extend(_r_auto_loaded_and_large(config_files))
+    findings.extend(_r_stale_auto_loaded(config_files))
+    findings.extend(_r_home_is_git_repo(home_is_git_repo))
+    findings.extend(_r_orphaned_worktree(worktrees))
+    findings.extend(_r_dirty_unpushed_stale(repos))
+    severity_order = {Severity.HIGH: 0, Severity.MED: 1, Severity.LOW: 2}
+    findings.sort(key=lambda x: severity_order.get(x[&quot;severity&quot;], 9))
+    return findings
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Run tests</strong></li>
+</ul>
+<p>Run: <code>pytest tests/test_rules.py -v</code></p>
+<p>Expected: All 6 tests PASS.</p>
+<h3>Task 5.3: Wire rules into Flask</h3>
+<p><strong>Files:</strong>
+- Modify: <code>/Users/jakefassora/projects/scope/app.py</code>
+- Modify: <code>/Users/jakefassora/projects/scope/scope/config_scanner.py</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Add <code>auto_loaded</code> + <code>age_days</code> to scanner output</strong></li>
+</ul>
+<p>Edit <code>/Users/jakefassora/projects/scope/scope/config_scanner.py</code>. Replace the <code>_describe</code> function with:</p>
+<pre><code class="language-python">def _describe(path: Path, auto_loaded: bool = True) -&gt; dict:
+    from datetime import datetime, timezone
+    stat = path.stat()
+    mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+    return {
+        &quot;path&quot;: str(path),
+        &quot;name&quot;: path.name,
+        &quot;size_bytes&quot;: stat.st_size,
+        &quot;tokens_est&quot;: estimate_tokens_from_bytes(stat.st_size),
+        &quot;modified_iso&quot;: mtime.isoformat(timespec=&quot;seconds&quot;),
+        &quot;age_days&quot;: (datetime.now(tz=timezone.utc) - mtime).days,
+        &quot;auto_loaded&quot;: auto_loaded,
+    }
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Add /api/insights</strong></li>
+</ul>
+<p>Add to <code>app.py</code>:</p>
+<pre><code class="language-python">from scope.rules import evaluate_all
+</code></pre>
+<p>Add this route:</p>
+<pre><code class="language-python">@app.get(&quot;/api/insights&quot;)
+def api_insights():
+    claude_files = scan_claude_dir(HOME / &quot;.claude&quot;)
+    project_md = find_claude_md_files(HOME / &quot;projects&quot;)
+    repos = find_repos(HOME / &quot;projects&quot;)
+    worktrees = find_repos(HOME / &quot;.claude&quot; / &quot;worktrees&quot;)
+    home_is_repo = (HOME / &quot;.git&quot;).is_dir()
+    findings = evaluate_all(
+        config_files=claude_files + project_md,
+        repos=repos,
+        worktrees=worktrees,
+        home_is_git_repo=home_is_repo,
+    )
+    return jsonify({&quot;findings&quot;: findings, &quot;home_is_git_repo&quot;: home_is_repo})
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Smoke-test</strong></li>
+</ul>
+<p>Run server. Then: <code>curl -s http://127.0.0.1:8765/api/insights | python -m json.tool</code></p>
+<p>Expected: A <code>findings</code> array with rule names + severities + plain-English messages.</p>
+<h3>Task 5.4: Wire Insights panel into UI</h3>
+<p><strong>Files:</strong>
+- Modify: <code>/Users/jakefassora/projects/scope/static/app.js</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Append insights rendering</strong></li>
+</ul>
+<p>Append to <code>static/app.js</code>:</p>
+<pre><code class="language-javascript">function renderInsights() {
+  fetch(&quot;/api/insights&quot;).then(function(r) { return r.json(); }).then(function(d) {
+    var body = document.getElementById(&quot;insights-body&quot;);
+    if (!d.findings.length) {
+      body.innerHTML = &quot;&lt;p style='color:var(--green)'&gt;✓ No issues found.&lt;/p&gt;&quot;;
+      return;
+    }
+    body.innerHTML = &quot;&quot;;
+    d.findings.forEach(function(f) {
+      var row = document.createElement(&quot;div&quot;);
+      row.className = &quot;file-row&quot;;
+      var color = f.severity === &quot;HIGH&quot; ? &quot;auto&quot; : &quot;ondemand&quot;;
+      row.innerHTML =
+        &quot;&lt;span&gt;&quot; + f.message + &quot;&lt;/span&gt;&quot; +
+        &quot;&lt;span class=\&quot;badge &quot; + color + &quot;\&quot;&gt;&quot; + f.severity + &quot;&lt;/span&gt;&quot; +
+        &quot;&lt;span&gt;&lt;/span&gt;&quot; +
+        &quot;&lt;span&gt;&quot; + f.rule + &quot;&lt;/span&gt;&quot;;
+      body.appendChild(row);
+    });
+  });
+}
+
+// Re-run on initial load + on refresh
+var originalLoadAll = loadAll;
+loadAll = function() { originalLoadAll(); renderInsights(); };
+renderInsights();
+</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Manual verification</strong></li>
+</ul>
+<p>Reload <code>localhost:8765</code>. The Insights panel at the top now shows real findings against your actual machine.</p>
+<h3>Task 5.5: Write README</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/README.md</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Write README</strong></li>
+</ul>
+<p>Create <code>/Users/jakefassora/projects/scope/README.md</code>:</p>
+<pre><code class="language-markdown"># scope
+
+Read-only local visualizer for Claude Code config and your git portfolio.
+Catches config rot, stale CLAUDE.md files, abandoned worktrees, and at-risk
+unpushed work — without burning Claude tokens to ask.
+
+## Install
+
+```bash
+cd ~/projects/scope
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+</code></pre>
+<h2>Run</h2>
+<pre><code class="language-bash">python app.py
+</code></pre>
+<p>Open <a href="http://127.0.0.1:8765">http://127.0.0.1:8765</a>.</p>
+<h2>What it does</h2>
+<p>Four tabs:
+- <strong>Claude Context</strong> — every CLAUDE.md and <code>~/.claude/</code> config file, with token cost
+- <strong>File Browser</strong> — click into any folder under <code>~</code> (deny list respected)
+- <strong>Processes</strong> — running <code>claude</code> CLI processes and their working directory
+- <strong>Git State</strong> — every repo in <code>~/projects/</code> + every active worktree</p>
+<p>Plus an <strong>Insights</strong> panel surfacing common config-rot patterns.</p>
+<h2>Security</h2>
+<ul>
+<li>Read-only. Never modifies your files.</li>
+<li>Localhost-only (<code>127.0.0.1</code>). Not reachable from your network.</li>
+<li>Hard deny list (baked into code): session transcripts, credentials, SSH/AWS/GPG keys, <code>.env</code> files, <code>*.pem</code>, <code>*.key</code>.</li>
+<li>Secret regex redaction before any file content reaches the browser.</li>
+<li>No external HTTP calls. No telemetry. No LLM.</li>
+</ul>
+<h2>Tests</h2>
+<pre><code class="language-bash">pytest tests/ -v
+</code></pre>
+<h2>Attributions</h2>
+<p>Small patterns lifted (with attribution in source headers) from:</p>
+<ul>
+<li><a href="https://github.com/phuryn/claude-usage"><code>phuryn/claude-usage</code></a> — MIT — <code>~/.claude/</code> scanning patterns</li>
+<li><a href="https://github.com/nosarthur/gita"><code>nosarthur/gita</code></a> — MIT — per-repo git status logic</li>
+</ul>
+<pre><code>
+- [ ] **Step 2: Final test run**
+
+Run: `pytest tests/ -v`
+
+Expected: All tests pass.
+
+- [ ] **Step 3: Final commit**
+
+```bash
+git add scope/rules.py tests/test_rules.py scope/config_scanner.py app.py static/app.js README.md
+git commit -m &quot;feat(rules): deterministic insights engine + README&quot;
+</code></pre>
+<h3>Task 5.6: Render the plan as HTML</h3>
+<p><strong>Files:</strong>
+- Create: <code>/Users/jakefassora/projects/scope/docs/PLAN.html</code></p>
+<ul>
+<li>[ ] <strong>Step 1: Generate HTML render of PLAN</strong></li>
+</ul>
+<p>This task can be done manually or scripted. Either way, render <code>docs/superpowers/plans/2026-05-12-scope-v1.md</code> to <code>docs/PLAN.html</code> with the same styling as <code>docs/PRD.html</code>. Open it in the browser as the final visual check.</p>
+<ul>
+<li>[ ] <strong>Step 2: Final commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add docs/PLAN.html
+git commit -m &quot;docs: add HTML render of implementation plan&quot;
+</code></pre>
+<hr />
+<h2>Done Criteria</h2>
+<p>When all six phases are checked off:</p>
+<ol>
+<li>✅ <code>pytest tests/ -v</code> shows all tests passing</li>
+<li>✅ <code>python app.py</code> boots, <code>localhost:8765</code> renders</li>
+<li>✅ Claude Context tab shows real CLAUDE.md files with token costs</li>
+<li>✅ File Browser walks any folder under <code>~</code>, refusing excluded paths</li>
+<li>✅ Processes tab shows any running <code>claude</code> instances</li>
+<li>✅ Git State tab shows every repo + worktree with branch + status</li>
+<li>✅ Insights panel shows real findings against the user's actual machine</li>
+<li>✅ No external HTTP calls anywhere in the source</li>
+</ol>
+<hr />
+<p><em>End of plan.</em></p>
+
+<div class="footer">
+  Generated 2026-05-12 · <a href="https://github.com/phuryn/claude-usage">phuryn/claude-usage</a> patterns
+</div>
+
+</div>
+</body>
+</html>
