@@ -1,6 +1,7 @@
 # scope — Product Requirements Document
 
-**Status:** Draft v1.1
+**Status:** ✅ Shipped (v1.1) · 2026-05-12 · 14 commits · 49 tests passing at v1 cut
+**Successors:** [v2 PRD](docs/PRD-v2.md) (System Map) → [v2.5 PRD](docs/PRD-v2.5.md) (Plan viewer)
 **Owner:** Jake Fassora
 **Date:** 2026-05-12
 

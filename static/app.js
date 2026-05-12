@@ -219,9 +219,8 @@ renderInsights();
   });
 })();
 
-// ── System Map (Phase 3) ──────────────────────────────────────────────────────
+// ── System Map — D3 circle packing + sunburst (toggle) ──────────────────────
 
-// Tooltip element — created once, reused
 var _mapTooltip = (function() {
   var el = document.createElement("div");
   el.className = "map-tooltip";
@@ -229,292 +228,323 @@ var _mapTooltip = (function() {
   return el;
 })();
 
-// Navigate to a named tab by clicking its button
 function activateTab(name) {
   var btn = document.querySelector("[data-tab='" + name + "']");
   if (btn) btn.click();
 }
 
-// Scroll the .file-row whose first-span title contains path (or basename) into view
-function highlightRowByPath(path) {
-  if (!path) return;
-  var base = path.replace(/^.*\//, "");
-  var rows = document.querySelectorAll(".file-row");
-  var found = null;
-  for (var i = 0; i < rows.length; i++) {
-    var span = rows[i].querySelector("span");
-    if (!span) continue;
-    var t = span.getAttribute("title") || "";
-    var txt = span.textContent || "";
-    if (t.indexOf(path) !== -1 || txt.indexOf(base) !== -1) {
-      found = rows[i];
-      break;
-    }
+var mapLoaded = false;
+var _mapData = null;
+var _mapView = "circles";
+
+var STATUS_COLOR = { complete: "#3fb950", iterating: "#58a6ff", planning: "#8957e5", draft: "#7d8590" };
+var KIND_COLOR = {
+  root: "#0d1117", region: "#1c2230", repo: "#2d6cdf", worktree: "#1f6feb",
+  group: "#3b3654", plan: "#7d8590", phase: "#3fb950", process: "#2ea043",
+  file: "#7d8590", placeholder: "#21262d"
+};
+
+function _showTip(html, e) {
+  _mapTooltip.innerHTML = html;
+  _mapTooltip.style.display = "block";
+  _mapTooltip.style.left = (e.pageX + 12) + "px";
+  _mapTooltip.style.top = (e.pageY + 12) + "px";
+}
+function _hideTip() { _mapTooltip.style.display = "none"; }
+
+// Plan viewer modal
+function openPlan(path, name) {
+  var titleEl = document.getElementById("plan-modal-title");
+  var bodyEl = document.getElementById("plan-modal-body");
+  titleEl.textContent = name || path;
+  bodyEl.innerHTML = "<p style='color:var(--muted)'>Loading…</p>";
+  document.getElementById("plan-modal-bg").classList.add("open");
+  fetch("/api/plan?path=" + encodeURIComponent(path)).then(function(r){return r.json();}).then(function(d){
+    if (d.error) { bodyEl.innerHTML = "<p style='color:var(--red)'>" + d.error + "</p>"; return; }
+    if (d.ext === "md" && typeof marked !== "undefined") bodyEl.innerHTML = marked.parse(d.content);
+    else if (d.ext === "html" || d.ext === "htm") bodyEl.innerHTML = d.content;
+    else bodyEl.innerHTML = "<pre>" + d.content.replace(/</g, "&lt;") + "</pre>";
+  });
+}
+function closePlanModal() {
+  document.getElementById("plan-modal-bg").classList.remove("open");
+}
+document.getElementById("plan-modal-bg").addEventListener("click", closePlanModal);
+document.addEventListener("keydown", function(e){ if (e.key === "Escape") closePlanModal(); });
+
+// ── Circle packing ──────────────────────────────────────────────────────────
+function renderCircles(data) {
+  var stage = document.getElementById("map-canvas");
+  stage.innerHTML = "";
+  var rect = stage.getBoundingClientRect();
+  var W = rect.width, H = rect.height;
+  if (W < 50) return;
+  var D = Math.min(W, H);
+
+  var root = d3.hierarchy(data)
+    .sum(function(d){ return d.children ? 0 : (d.value || 1); })
+    .sort(function(a,b){ return (b.value||0) - (a.value||0); });
+  d3.pack().size([D, D]).padding(4)(root);
+
+  var svg = d3.select(stage).append("svg")
+    .attr("viewBox", -D/2 + " " + -D/2 + " " + D + " " + D)
+    .attr("preserveAspectRatio", "xMidYMid meet")
+    .style("background", "#06080c");
+
+  var focus = root, view;
+
+  var node = svg.append("g").selectAll("g")
+    .data(root.descendants().slice(1))
+    .join("g").attr("class", "cp-node");
+
+  node.append("circle")
+    .attr("fill", function(d){
+      var k = d.data.kind;
+      if (k === "phase") return STATUS_COLOR[d.data.status] || "#7d8590";
+      if (k === "plan") {
+        var s = d.data.phase_status; if (s) return STATUS_COLOR[s] || "#7d8590";
+        return d.data.ext === "html" ? "#ffa657" : "#58a6ff";
+      }
+      if (d.data.has_process) return "#2ea043";
+      if (d.data.severity === "HIGH") return "#f85149";
+      if (d.data.dirty) return "#d29922";
+      return KIND_COLOR[k] || "#21262d";
+    })
+    .attr("fill-opacity", function(d){ return d.children ? 0.35 : 0.85; })
+    .on("click", function(event, d){
+      event.stopPropagation();
+      if (!d.children && d.data.kind === "plan" && d.data.path) {
+        openPlan(d.data.path, d.data.rel || d.data.name); return;
+      }
+      if (focus !== d) zoom(d);
+    })
+    .on("mouseover", function(e, d){
+      var parts = ["<b>" + d.data.name + "</b> · " + (d.data.kind || "")];
+      if (d.data.status) parts.push(d.data.status);
+      if (d.data.phase_status) parts.push(d.data.phase_status);
+      if (d.data.branch) parts.push("branch: " + d.data.branch);
+      if (d.data.rel) parts.push(d.data.rel);
+      _showTip(parts.join(" · "), e);
+    })
+    .on("mousemove", function(e){ _mapTooltip.style.left = (e.pageX+12)+"px"; _mapTooltip.style.top = (e.pageY+12)+"px"; })
+    .on("mouseout", _hideTip);
+
+  var label = svg.append("g").style("pointer-events", "none").selectAll("text")
+    .data(root.descendants().slice(1))
+    .join("text")
+    .attr("class", function(d){ return "cp-label" + (d.depth > 2 ? " dim" : ""); })
+    .style("fill-opacity", function(d){ return labelVisible(d, root) ? 1 : 0; })
+    .style("display", function(d){ return labelVisible(d, root) ? "inline" : "none"; })
+    .text(function(d){ return fitLabel(d.data.name, d.r); });
+
+  var centerName = svg.append("text").attr("text-anchor", "middle").attr("dy", "-0.4em")
+    .style("font", "600 14px ui-monospace, monospace").style("fill", "#7d8590").style("pointer-events", "none");
+  var centerHint = svg.append("text").attr("text-anchor", "middle").attr("dy", "1em")
+    .style("font", "10px ui-monospace, monospace").style("fill", "#7d8590").style("pointer-events", "none");
+
+  svg.on("click", function(){ zoom(focus.parent || root); });
+  zoomTo([root.x, root.y, root.r * 2]);
+
+  function labelVisible(d, f) {
+    if (d.parent !== f) return false;
+    if (!d.children) return d.r > 14;
+    return d.r > 24;
   }
-  if (!found) return;
-  found.scrollIntoView({ behavior: "smooth", block: "center" });
-  found.classList.add("row-highlight");
-  setTimeout(function() { found.classList.remove("row-highlight"); }, 1500);
+  function fitLabel(name, r) {
+    var max = Math.max(3, Math.floor(r / 4));
+    return name.length > max ? name.slice(0, Math.max(2, max - 1)) + "…" : name;
+  }
+  function zoomTo(v) {
+    var k = D / v[2]; view = v;
+    node.attr("transform", function(d){ return "translate(" + (d.x - v[0]) * k + "," + (d.y - v[1]) * k + ")"; });
+    label.attr("transform", function(d){ return "translate(" + (d.x - v[0]) * k + "," + (d.y - v[1]) * k + ")"; });
+    node.select("circle").attr("r", function(d){ return d.r * k; });
+    label.style("font-size", function(d){ return Math.max(9, Math.min(16, d.r * k / 4)) + "px"; });
+  }
+  function zoom(d) {
+    focus = d;
+    centerName.text(focus === root ? "" : focus.data.name);
+    centerHint.text(focus === root ? "" : "click background to zoom out");
+    var tr = svg.transition().duration(650)
+      .tween("zoom", function(){ var i = d3.interpolateZoom(view, [focus.x, focus.y, focus.r * 2]); return function(t){ zoomTo(i(t)); }; });
+    label.transition(tr)
+      .style("fill-opacity", function(d2){ return labelVisible(d2, focus) ? 1 : 0; })
+      .on("start", function(d2){ if (labelVisible(d2, focus)) this.style.display = "inline"; })
+      .on("end", function(d2){ if (!labelVisible(d2, focus)) this.style.display = "none"; });
+  }
 }
 
-var mapLoaded = false;
-var _cy = null;
+// ── Sunburst ────────────────────────────────────────────────────────────────
+function renderSunburst(data) {
+  var stage = document.getElementById("map-canvas");
+  stage.innerHTML = "";
+  var rect = stage.getBoundingClientRect();
+  var W = rect.width, H = rect.height;
+  if (W < 50) return;
+  var VISIBLE_DEPTH = 3;
+  var radius = Math.min(W, H) / 2 - 20;
+  var ringR = radius / (VISIBLE_DEPTH + 1);
+
+  var root = d3.hierarchy(data)
+    .sum(function(d){ return d.children ? 0 : (d.value || 1); })
+    .sort(function(a,b){ return (b.value||0) - (a.value||0); });
+  d3.partition().size([2 * Math.PI, root.height + 1])(root);
+  root.each(function(d){ d.current = d; });
+
+  var arc = d3.arc()
+    .startAngle(function(d){ return d.x0; }).endAngle(function(d){ return d.x1; })
+    .padAngle(function(d){ return Math.min((d.x1 - d.x0) / 2, 0.004); })
+    .padRadius(radius * 1.5)
+    .innerRadius(function(d){ return d.y0 * ringR; })
+    .outerRadius(function(d){ return Math.max(d.y0 * ringR, d.y1 * ringR - 1.5); });
+
+  var svg = d3.select(stage).append("svg")
+    .attr("viewBox", (-W/2) + " " + (-H/2) + " " + W + " " + H)
+    .attr("preserveAspectRatio", "xMidYMid meet")
+    .style("background", "#06080c");
+
+  var path = svg.append("g").selectAll("path")
+    .data(root.descendants().slice(1))
+    .join("path")
+    .attr("class", "sb-arc")
+    .attr("fill", arcColor)
+    .attr("fill-opacity", function(d){ return arcVisible(d.current) ? (d.children ? 0.6 : 0.88) : 0; })
+    .attr("pointer-events", function(d){ return arcVisible(d.current) ? "auto" : "none"; })
+    .attr("d", function(d){ return arc(d.current); })
+    .on("click", clicked)
+    .on("mouseover", function(e, d){
+      var parts = ["<b>" + d.data.name + "</b> · " + d.data.kind];
+      if (d.data.status) parts.push(d.data.status);
+      if (d.data.phase_status) parts.push(d.data.phase_status);
+      _showTip(parts.join(" · "), e);
+    })
+    .on("mousemove", function(e){ _mapTooltip.style.left = (e.pageX+12)+"px"; _mapTooltip.style.top = (e.pageY+12)+"px"; })
+    .on("mouseout", _hideTip);
+
+  var label = svg.append("g").style("pointer-events", "none").selectAll("text")
+    .data(root.descendants().slice(1))
+    .join("text")
+    .attr("class", "sb-label").attr("dy", "0.35em")
+    .attr("fill-opacity", function(d){ return +labelVisible(d.current); })
+    .attr("transform", function(d){ return labelTransform(d.current); })
+    .text(function(d){ return fitArcLabel(d, d.current); });
+
+  var center = svg.append("circle").datum(root)
+    .attr("r", ringR * 0.95)
+    .attr("fill", "#0d1117").attr("stroke", "#30363d")
+    .attr("pointer-events", "all").style("cursor", "pointer")
+    .on("click", clicked);
+  var centerName = svg.append("text").attr("text-anchor", "middle").attr("dy", "-0.3em")
+    .attr("fill", "#e6edf3").style("font", "600 14px ui-monospace, monospace")
+    .style("pointer-events", "none").text("~");
+  var centerHint = svg.append("text").attr("text-anchor", "middle").attr("dy", "1.1em")
+    .attr("fill", "#7d8590").style("font", "10px ui-monospace, monospace")
+    .style("pointer-events", "none").text("scope");
+
+  function arcColor(d) {
+    if (d.data.kind === "phase") return STATUS_COLOR[d.data.status] || "#7d8590";
+    if (d.data.kind === "plan") return STATUS_COLOR[d.data.phase_status || "draft"];
+    if (d.data.has_process) return "#2ea043";
+    return KIND_COLOR[d.data.kind] || "#3a3f4b";
+  }
+
+  function clicked(event, p) {
+    if (!p.children && p.data.kind === "plan" && p.data.path) {
+      openPlan(p.data.path, p.data.rel || p.data.name); return;
+    }
+    if (event) event.stopPropagation();
+    center.datum(p.parent || root);
+    centerName.text(p === root ? "~" : p.data.name);
+    centerHint.text(p === root ? "scope" : "click center to zoom out");
+    root.each(function(d){
+      d.target = {
+        x0: Math.max(0, Math.min(1, (d.x0 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
+        x1: Math.max(0, Math.min(1, (d.x1 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
+        y0: Math.max(0, d.y0 - p.depth),
+        y1: Math.max(0, d.y1 - p.depth)
+      };
+    });
+    var tr = svg.transition().duration(650);
+    path.transition(tr)
+      .tween("data", function(d){ var i = d3.interpolate(d.current, d.target); return function(t){ d.current = i(t); }; })
+      .filter(function(d){ return +this.getAttribute("fill-opacity") || arcVisible(d.target); })
+      .attr("fill-opacity", function(d){ return arcVisible(d.target) ? (d.children ? 0.6 : 0.88) : 0; })
+      .attr("pointer-events", function(d){ return arcVisible(d.target) ? "auto" : "none"; })
+      .attrTween("d", function(d){ return function(){ return arc(d.current); }; });
+    label.transition(tr)
+      .filter(function(d){ return +this.getAttribute("fill-opacity") || labelVisible(d.target); })
+      .attr("fill-opacity", function(d){ return +labelVisible(d.target); })
+      .attrTween("transform", function(d){ return function(){ return labelTransform(d.current); }; })
+      .on("end", function(d){ d3.select(this).text(fitArcLabel(d, d.target)); });
+  }
+  function arcVisible(d){ return d.y1 > 0 && d.y1 <= VISIBLE_DEPTH + 1 && d.y0 >= 1 && d.x1 > d.x0; }
+  function labelVisible(d) {
+    if (!arcVisible(d)) return false;
+    var arcLen = (d.x1 - d.x0) * ((d.y0 + d.y1) / 2) * ringR;
+    var thick = (d.y1 - d.y0) * ringR;
+    return arcLen > 36 && thick > 12;
+  }
+  function labelTransform(d) {
+    var x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+    var y = (d.y0 + d.y1) / 2 * ringR;
+    return "rotate(" + (x - 90) + ") translate(" + y + ",0) rotate(" + (x < 180 ? 0 : 180) + ")";
+  }
+  function fitArcLabel(d, projected) {
+    var arcLen = (projected.x1 - projected.x0) * ((projected.y0 + projected.y1) / 2) * ringR;
+    var max = Math.max(3, Math.floor(arcLen / 6.2));
+    var name = d.data.name || "";
+    return name.length > max ? name.slice(0, Math.max(2, max - 1)) + "…" : name;
+  }
+}
+
+// ── Dispatcher / view toggle ────────────────────────────────────────────────
+function _renderMap() {
+  if (!_mapData) return;
+  if (_mapView === "sunburst") renderSunburst(_mapData);
+  else renderCircles(_mapData);
+}
 
 function loadMap() {
-  if (typeof cytoscape === "undefined") {
-    setTimeout(loadMap, 100);
-    return;
-  }
-  // Register fcose layout extension (idempotent guard)
-  if (window.cytoscapeFcose && !window._fcoseRegistered) {
-    cytoscape.use(window.cytoscapeFcose);
-    window._fcoseRegistered = true;
-  }
-
-  fetch("/api/graph").then(function(r) { return r.json(); }).then(function(data) {
-    var canvas = document.getElementById("map-canvas");
-    if (!canvas) return;
-
-    // Empty state (baseline is 3 nodes: home + region:.claude + region:projects)
-    if (!data.nodes || data.nodes.length <= 3) {
-      canvas.innerHTML =
-        "<p style='text-align:center;padding:40px;color:var(--muted)'>" +
-        "Map is empty. Create a project under <code>~/projects/</code> " +
-        "or add a CLAUDE.md to populate it.</p>";
-      return;
-    }
-
-    canvas.innerHTML = "";
-
-    // Build cytoscape elements
-    var elements = [];
-    data.nodes.forEach(function(n) {
-      var d = { id: n.id, label: n.label, type: n.type };
-      var fields = ["path", "severity", "has_process", "branch", "dirty", "untracked",
-                    "ahead", "behind", "stale", "size_bytes",
-                    "tokens_est", "age_days", "parent", "attached_to_id", "cwd", "pid"];
-      fields.forEach(function(f) {
-        if (n[f] !== undefined && n[f] !== null) d[f] = n[f];
-      });
-      elements.push({ data: d });
-    });
-    data.edges.forEach(function(e) {
-      var cls = e.style || "";
-      elements.push({ data: { id: e.source + "->" + e.target, source: e.source, target: e.target }, classes: cls });
-    });
-
-    var layout = {
-      name: "fcose",
-      quality: "proof",
-      animate: false,
-      randomize: false,
-      fit: true,
-      padding: 30,
-      nodeSeparation: 80,
-      idealEdgeLength: 80,
-      nodeRepulsion: 8000,
-      gravity: 0.25,
-      tile: true,
-      tilingPaddingVertical: 10,
-      tilingPaddingHorizontal: 10
-    };
-
-    _cy = cytoscape({
-      container: canvas,
-      elements: elements,
-      style: [
-        // base node
-        { selector: "node", style: {
-            "label": "data(label)",
-            "color": "#e6edf3",
-            "background-color": "#21262d",
-            "border-color": "#30363d",
-            "border-width": 1,
-            "font-size": "11px",
-            "font-family": "ui-monospace, monospace",
-            "text-valign": "bottom",
-            "text-margin-y": 6,
-            "width": 24, "height": 24,
-            "shape": "round-rectangle"
-        }},
-        // the small "~" centroid
-        { selector: 'node[type="home"]', style: {
-            "background-color": "#58a6ff",
-            "border-color": "#58a6ff",
-            "width": 30, "height": 30,
-            "font-size": "13px",
-            "font-weight": "bold",
-            "label": "~"
-        }},
-        // compound regions
-        { selector: 'node[type="region"]', style: {
-            "background-color": "rgba(33,38,45,0.5)",
-            "background-opacity": 0.5,
-            "border-color": "#30363d",
-            "border-width": 1,
-            "label": "data(label)",
-            "text-valign": "top",
-            "text-halign": "center",
-            "text-margin-y": -8,
-            "color": "#7d8590",
-            "font-size": "12px",
-            "font-weight": "bold",
-            "shape": "round-rectangle",
-            "padding": "14px",
-            "min-width": 100,
-            "min-height": 80
-        }},
-        { selector: 'node[type="region"][?has_process]', style: {
-            "border-color": "#3fb950",
-            "border-width": 2,
-            "overlay-color": "#3fb950",
-            "overlay-opacity": 0.08
-        }},
-        { selector: 'node[type="region"][severity="HIGH"]', style: {
-            "border-color": "#f85149", "border-width": 2
-        }},
-        { selector: 'node[type="region"][severity="MED"]', style: {
-            "border-color": "#d29922", "border-width": 2
-        }},
-        // config files (now always children of a region)
-        { selector: 'node[type="config"]', style: {
-            "shape": "round-rectangle",
-            "background-color": "#0d1117",
-            "width": 18, "height": 18,
-            "font-size": "10px"
-        }},
-        { selector: 'node[type="config"][severity="HIGH"]', style: {
-            "border-color": "#f85149", "border-width": 2
-        }},
-        { selector: 'node[type="config"][severity="MED"]', style: {
-            "border-color": "#d29922", "border-width": 2
-        }},
-        // process nodes
-        { selector: 'node[type="process"]', style: {
-            "shape": "ellipse",
-            "background-color": "#3fb950",
-            "border-color": "#3fb950",
-            "width": 16, "height": 16
-        }},
-        // edges (mostly only process edges remain)
-        { selector: "edge", style: {
-            "width": 1,
-            "line-color": "#30363d",
-            "target-arrow-color": "#30363d",
-            "target-arrow-shape": "triangle",
-            "curve-style": "bezier"
-        }},
-        { selector: "edge.process", style: {
-            "line-color": "#3fb950",
-            "target-arrow-color": "#3fb950",
-            "line-style": "dotted"
-        }}
-      ],
-      layout: layout
-    });
-
-    // Tooltip on hover
-    _cy.on("mouseover", "node", function(evt) {
-      var d = evt.target.data();
-      var lines = [];
-      if (d.type === "home") {
-        lines.push("Home directory");
-      } else if (d.type === "config") {
-        lines.push(d.path || "");
-        var parts = [];
-        if (d.size_bytes !== undefined) parts.push(fmtBytes(d.size_bytes));
-        if (d.tokens_est !== undefined) parts.push("~" + d.tokens_est + " tok");
-        if (d.age_days !== undefined) parts.push(d.age_days + "d old");
-        if (parts.length) lines.push(parts.join(" · "));
-      } else if (d.type === "region") {
-        if (d.id === "region:.claude") {
-          lines.push("Global Claude config — auto-loaded each turn");
-        } else if (d.id === "region:projects") {
-          lines.push("Your project portfolio");
-        } else if (d.path) {
-          var parts = [d.path];
-          if (d.branch) parts.push("branch: " + d.branch);
-          if (d.dirty !== undefined) {
-            var status = [];
-            if (d.dirty) status.push(d.dirty + " dirty");
-            if (d.untracked) status.push(d.untracked + " untracked");
-            if (d.ahead) status.push("↑" + d.ahead);
-            if (d.behind) status.push("↓" + d.behind);
-            parts.push(status.length ? status.join(", ") : "clean");
-          }
-          if (d.stale) parts.push("STALE");
-          lines.push(parts.join(" · "));
-        } else {
-          lines.push(d.label || d.id);
-        }
-      } else if (d.type === "process") {
-        lines.push("PID " + d.pid + " · cwd: " + d.cwd);
-      } else {
-        lines.push(d.label || d.id);
-      }
-      _mapTooltip.innerHTML = lines.map(function(l) {
-        return "<div>" + l + "</div>";
-      }).join("");
-      _mapTooltip.style.display = "block";
-      var oe = evt.originalEvent;
-      _mapTooltip.style.left = (oe.pageX + 12) + "px";
-      _mapTooltip.style.top  = (oe.pageY + 12) + "px";
-    });
-
-    _cy.on("mousemove", "node", function(evt) {
-      var oe = evt.originalEvent;
-      _mapTooltip.style.left = (oe.pageX + 12) + "px";
-      _mapTooltip.style.top  = (oe.pageY + 12) + "px";
-    });
-
-    _cy.on("mouseout", "node", function() {
-      _mapTooltip.style.display = "none";
-    });
-
-    // Click → zoom into region or navigate to matching tab
-    _cy.on("tap", "node", function(evt) {
-      var d = evt.target.data();
-
-      // zoom into a regular region (not top-level .claude/projects/home)
-      if (d.type === "region" && d.id !== "region:.claude" && d.id !== "region:projects") {
-        _cy.animate({ fit: { eles: evt.target, padding: 30 } }, { duration: 300 });
-        return;
-      }
-
-      // file click → jump to relevant existing tab (preserve v2 behavior)
-      if (d.type === "config") {
-        activateTab("context");
-        setTimeout(function() { highlightRowByPath(d.path); }, 50);
-      } else if (d.type === "process") {
-        activateTab("processes");
-      }
-      // (no behavior for home or top-level regions)
-    });
-
-    // click empty background → zoom out
-    _cy.on("tap", function(evt) {
-      if (evt.target === _cy) {
-        _cy.animate({ fit: { eles: _cy.elements(), padding: 30 } }, { duration: 300 });
-      }
-    });
-
-  }).catch(function(err) {
-    var canvas = document.getElementById("map-canvas");
-    if (canvas) canvas.textContent = "Error loading map: " + err.message;
+  if (typeof d3 === "undefined") { setTimeout(loadMap, 100); return; }
+  var canvas = document.getElementById("map-canvas");
+  canvas.textContent = "Loading…";
+  fetch("/api/treemap").then(function(r){ return r.json(); }).then(function(data){
+    _mapData = data;
+    _renderMap();
+  }).catch(function(err){
+    canvas.textContent = "Error loading map: " + err.message;
   });
 }
 
-// Lazy-load map on first click
-document.querySelector("[data-tab='map']").addEventListener("click", function() {
+// View toggle buttons
+document.querySelectorAll(".map-view-btn").forEach(function(btn){
+  btn.addEventListener("click", function(){
+    document.querySelectorAll(".map-view-btn").forEach(function(b){ b.classList.remove("active"); });
+    btn.classList.add("active");
+    _mapView = btn.dataset.view;
+    _renderMap();
+  });
+});
+
+// Lazy-load on first tab open
+document.querySelector("[data-tab='map']").addEventListener("click", function(){
   if (!mapLoaded) { loadMap(); mapLoaded = true; }
 });
 
-// Refresh integration: reload map if it's the active tab
+// Resize
+var _mapResizeTO;
+window.addEventListener("resize", function(){
+  clearTimeout(_mapResizeTO);
+  _mapResizeTO = setTimeout(function(){
+    if (_mapData && document.getElementById("tab-map").classList.contains("active")) _renderMap();
+  }, 150);
+});
+
+// Refresh integration
 var _origLoadAll2 = loadAll;
-loadAll = function() {
+loadAll = function(){
   _origLoadAll2();
-  var mapPanel = document.getElementById("tab-map");
-  if (mapPanel && mapPanel.classList.contains("active")) {
+  if (document.getElementById("tab-map").classList.contains("active")) {
     mapLoaded = false;
     loadMap();
     mapLoaded = true;

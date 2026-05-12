@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>scope · map prototypes</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<style>
+  body { padding: 16px 24px; }
+  header { display: flex; justify-content: space-between; align-items: center; }
+  .proto-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 12px 0 16px; }
+  .proto-tab { background: transparent; border: none; border-bottom: 2px solid transparent;
+              padding: 10px 18px; color: var(--muted); cursor: pointer; font-size: 14px; }
+  .proto-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .proto-panel { display: none; }
+  .proto-panel.active { display: block; }
+  .blurb { background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+           padding: 10px 14px; margin-bottom: 12px; font-size: 13px; color: var(--muted); }
+  .blurb strong { color: var(--text); }
+  .stage { background: #06080c; border: 1px solid var(--border); border-radius: 8px;
+           height: 720px; position: relative; overflow: hidden; }
+  .stage svg { display: block; width: 100%; height: 100%; }
+  .tip { position: fixed; pointer-events: none; background: #0d1117; border: 1px solid var(--border);
+         padding: 6px 10px; border-radius: 4px; font: 12px ui-monospace, monospace;
+         color: var(--text); display: none; z-index: 100; max-width: 360px; }
+
+  /* Circle packing */
+  .cp-node circle { stroke: #06080c; stroke-width: 1.5; transition: stroke 0.15s; cursor: pointer; }
+  .cp-node circle:hover { stroke: var(--accent); stroke-width: 2; }
+  .cp-label { font: 11px ui-monospace, monospace; fill: #e6edf3; pointer-events: none;
+              text-anchor: middle; }
+  .cp-label.dim { fill: #7d8590; font-size: 10px; }
+
+  /* Sunburst */
+  .sb-arc { cursor: pointer; stroke: #06080c; stroke-width: 1; transition: opacity 0.2s; }
+  .sb-arc:hover { opacity: 0.85; }
+  .sb-label { font: 10px ui-monospace, monospace; fill: #e6edf3; pointer-events: none;
+              text-anchor: middle; }
+
+  /* Sankey */
+  .sk-node rect { stroke: #06080c; stroke-width: 1; cursor: pointer; }
+  .sk-node text { font: 11px ui-monospace, monospace; fill: #e6edf3; pointer-events: none; }
+  .sk-link { fill: none; opacity: 0.35; transition: opacity 0.2s; }
+  .sk-link:hover { opacity: 0.7; }
+
+  /* Kanban */
+  .kb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+             gap: 14px; padding: 4px; }
+  .kb-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+             padding: 14px; transition: border-color 0.15s, transform 0.15s; }
+  .kb-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .kb-card.has-process { border-color: #2ea043; box-shadow: 0 0 12px rgba(46,160,67,0.25); }
+  .kb-card.is-dirty { border-color: var(--amber); }
+  .kb-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; gap: 8px; }
+  .kb-title { font: 600 14px ui-monospace, monospace; color: var(--text); }
+  .kb-branch { font: 11px ui-monospace, monospace; color: var(--muted); }
+  .kb-meta { font-size: 11px; color: var(--muted); margin-bottom: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .kb-meta .pill { padding: 2px 8px; border-radius: 10px; background: #1c2230; border: 1px solid var(--border); }
+  .kb-meta .pill.green { color: #3fb950; border-color: rgba(63,185,80,0.4); }
+  .kb-meta .pill.amber { color: var(--amber); border-color: rgba(210,153,34,0.4); }
+  .kb-meta .pill.red { color: var(--red); border-color: rgba(248,81,73,0.4); }
+  .kb-meta .pill.blue { color: var(--accent); border-color: rgba(88,166,255,0.4); }
+  .kb-section { margin-top: 12px; }
+  .kb-section-title { font-size: 11px; color: var(--muted); text-transform: uppercase;
+                      letter-spacing: 0.5px; margin: 0 0 6px; display: flex; justify-content: space-between; }
+  .kb-progress { height: 4px; background: #21262d; border-radius: 2px; overflow: hidden; margin: 4px 0 10px; }
+  .kb-progress > span { display: block; height: 100%; background: linear-gradient(90deg, #3fb950, #58a6ff); }
+  .kb-phase { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
+              margin-bottom: 6px; background: rgba(13,17,23,0.4); }
+  .kb-phase.complete  { border-left: 3px solid #3fb950; }
+  .kb-phase.iterating { border-left: 3px solid #58a6ff; }
+  .kb-phase.planning  { border-left: 3px solid #8957e5; }
+  .kb-phase.draft     { border-left: 3px solid #30363d; }
+  .kb-phase-head { display: flex; justify-content: space-between; align-items: baseline;
+                   font: 12px ui-monospace, monospace; cursor: pointer; }
+  .kb-phase-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kb-phase-status { color: var(--muted); font-size: 10px; text-transform: uppercase; }
+  .kb-phase-files { margin-top: 6px; display: none; }
+  .kb-phase.open .kb-phase-files { display: block; }
+  .kb-file { display: flex; justify-content: space-between; padding: 3px 0;
+             font: 11px ui-monospace, monospace; cursor: pointer; color: var(--muted); }
+  .kb-file:hover { color: var(--accent); }
+  .kb-file .ext { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: #1c2230; margin-left: 6px; }
+  .kb-file .ext.html { color: #ffa657; }
+  .kb-file .ext.md { color: #58a6ff; }
+  .kb-loose { margin-top: 4px; }
+
+  /* Plan viewer modal */
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200;
+              display: none; align-items: center; justify-content: center; }
+  .modal-bg.open { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+           width: min(900px, 92vw); height: min(80vh, 800px); display: flex; flex-direction: column; }
+  .modal-head { display: flex; justify-content: space-between; align-items: center;
+                padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  .modal-title { font: 600 14px ui-monospace, monospace; color: var(--text); }
+  .modal-close { background: transparent; border: 1px solid var(--border); color: var(--muted);
+                 width: 28px; height: 28px; border-radius: 4px; cursor: pointer; padding: 0; }
+  .modal-close:hover { color: var(--text); border-color: var(--red); }
+  .modal-body { flex: 1; overflow: auto; padding: 18px 24px; font-size: 14px; line-height: 1.55; }
+  .modal-body h1 { font-size: 22px; margin-top: 0; }
+  .modal-body h2 { font-size: 17px; margin-top: 22px; color: var(--accent); }
+  .modal-body h3 { font-size: 15px; color: var(--text); }
+  .modal-body code { background: #0d1117; padding: 2px 6px; }
+  .modal-body pre { background: #0d1117; padding: 12px; border-radius: 6px; overflow-x: auto;
+                    border: 1px solid var(--border); }
+  .modal-body pre code { background: transparent; padding: 0; }
+  .modal-body table { border-collapse: collapse; }
+  .modal-body th, .modal-body td { border: 1px solid var(--border); padding: 6px 10px; }
+  .modal-body blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 4px 14px;
+                           color: var(--muted); background: rgba(88,166,255,0.05); }
+  .modal-body ul, .modal-body ol { padding-left: 22px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>scope · map prototypes</h1>
+    <a href="/" style="color: var(--muted); text-decoration: none; font-size: 13px;">← back to scope</a>
+  </header>
+
+  <nav class="proto-tabs">
+    <button class="proto-tab active" data-proto="cards">Cards</button>
+    <button class="proto-tab" data-proto="circles">Circle Packing</button>
+    <button class="proto-tab" data-proto="sunburst">Sunburst</button>
+    <button class="proto-tab" data-proto="sankey">Sankey</button>
+  </nav>
+
+  <section class="proto-panel active" data-proto="cards">
+    <div class="blurb"><strong>Cards.</strong> One card per project. Each phase expands to show the actual <code>.md</code>/<code>.html</code> plan files. Click any file to read it. Highest information density; most usable day-to-day.</div>
+    <div id="cards-stage" class="kb-grid"></div>
+  </section>
+
+  <section class="proto-panel" data-proto="circles">
+    <div class="blurb"><strong>Zoomable circle packing.</strong> Bubbles sized by content. Click to zoom in: project → plans group → phase → individual plan files. Click a plan file leaf to read it.</div>
+    <div id="circles-stage" class="stage"></div>
+  </section>
+
+  <section class="proto-panel" data-proto="sunburst">
+    <div class="blurb"><strong>Zoomable sunburst.</strong> Radial hierarchy — center = root, rings = depth. Click a sector to refocus. Phase status drives color.</div>
+    <div id="sunburst-stage" class="stage"></div>
+  </section>
+
+  <section class="proto-panel" data-proto="sankey">
+    <div class="blurb"><strong>Sankey flow.</strong> <code>.claude</code> (global config) → each project → status buckets. Every project shows up — width = phase count. Projects with no <code>.planning/</code> still flow through "no phases" so you see your full portfolio.</div>
+    <div id="sankey-stage" class="stage"></div>
+  </section>
+
+  <div id="tip" class="tip"></div>
+
+  <div id="modal-bg" class="modal-bg">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-head">
+        <span id="modal-title" class="modal-title"></span>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+<script>
+const tip = document.getElementById("tip");
+function showTip(html, e) { tip.innerHTML = html; tip.style.display = "block";
+  tip.style.left = (e.pageX + 12) + "px"; tip.style.top = (e.pageY + 12) + "px"; }
+function hideTip() { tip.style.display = "none"; }
+
+const STATUS_COLOR = { complete: "#3fb950", iterating: "#58a6ff", planning: "#8957e5", draft: "#7d8590" };
+const KIND_COLOR = {
+  root: "#0d1117", region: "#1c2230", repo: "#2d6cdf", worktree: "#1f6feb",
+  group: "#3b3654", plan: "#7d8590", phase: "#3fb950", process: "#2ea043",
+  file: "#7d8590", placeholder: "#21262d",
+};
+
+function fmtBytes(n) {
+  if (!n) return "0 B";
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n/1024).toFixed(1) + " KB";
+  return (n/1048576).toFixed(1) + " MB";
+}
+
+// ─── plan viewer modal ───
+function openPlan(path, name) {
+  document.getElementById("modal-title").textContent = name || path;
+  document.getElementById("modal-body").innerHTML = "<p style='color:var(--muted)'>Loading…</p>";
+  document.getElementById("modal-bg").classList.add("open");
+  fetch("/api/plan?path=" + encodeURIComponent(path)).then(r => r.json()).then(d => {
+    const body = document.getElementById("modal-body");
+    if (d.error) { body.innerHTML = "<p style='color:var(--red)'>" + d.error + "</p>"; return; }
+    if (d.ext === "md") body.innerHTML = marked.parse(d.content);
+    else if (d.ext === "html" || d.ext === "htm") body.innerHTML = d.content;
+    else body.innerHTML = "<pre>" + d.content.replace(/</g,"&lt;") + "</pre>";
+  });
+}
+function closeModal() { document.getElementById("modal-bg").classList.remove("open"); }
+document.getElementById("modal-bg").addEventListener("click", closeModal);
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+
+// ─── Tab switcher ───
+document.querySelectorAll(".proto-tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".proto-tab").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".proto-panel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.querySelector(`.proto-panel[data-proto="${btn.dataset.proto}"]`).classList.add("active");
+    if (btn.dataset.proto === "circles") renderCircles(_DATA);
+    if (btn.dataset.proto === "sunburst") renderSunburst(_DATA);
+    if (btn.dataset.proto === "sankey") renderSankey(_DATA);
+  });
+});
+
+let _DATA = null;
+fetch("/api/treemap").then(r => r.json()).then(data => {
+  _DATA = data;
+  renderCards(data);
+});
+
+// ─── Cards ───
+function renderCards(data) {
+  const stage = document.getElementById("cards-stage");
+  stage.innerHTML = "";
+
+  const claudeRegion = data.children.find(c => c.name === ".claude");
+  if (claudeRegion) {
+    const files = (claudeRegion.children || []).filter(c => c.kind === "file" || c.kind === "plan");
+    const card = document.createElement("div");
+    card.className = "kb-card";
+    card.innerHTML = `
+      <div class="kb-head"><span class="kb-title">.claude/</span><span class="kb-branch">global config</span></div>
+      <div class="kb-meta"><span class="pill blue">${files.length} files auto-loaded</span></div>
+      <div class="kb-section-title">global plans</div>
+    `;
+    const list = document.createElement("div"); list.className = "kb-loose";
+    files.slice(0, 10).forEach(f => list.appendChild(makeFileRow(f)));
+    card.appendChild(list);
+    stage.appendChild(card);
+  }
+
+  const projects = (data.children.find(c => c.name === "projects")?.children || [])
+    .filter(c => c.kind === "repo" || c.kind === "worktree");
+
+  projects.forEach(repo => {
+    const card = document.createElement("div");
+    card.className = "kb-card" + (repo.has_process ? " has-process" : "") + (repo.dirty ? " is-dirty" : "");
+    const plansGroup = repo.children?.find(g => g.name && g.name.startsWith("plans"));
+    const looseFiles = (plansGroup?.children || []).filter(c => c.kind === "plan");
+    const phases = (plansGroup?.children || []).filter(c => c.kind === "phase");
+
+    const pills = [];
+    if (repo.has_process) pills.push(`<span class="pill green">● claude running</span>`);
+    pills.push(`<span class="pill ${repo.dirty ? "amber" : "green"}">${repo.dirty ? repo.dirty + "Δ dirty" : "clean"}</span>`);
+    if (repo.ahead) pills.push(`<span class="pill blue">↑${repo.ahead}</span>`);
+    if (repo.behind) pills.push(`<span class="pill amber">↓${repo.behind}</span>`);
+    if (repo.severity === "HIGH") pills.push(`<span class="pill red">HIGH</span>`);
+
+    card.innerHTML = `
+      <div class="kb-head">
+        <span class="kb-title">${repo.name}${repo.kind === "worktree" ? " <span style='color:var(--muted);font-weight:400'>(wt)</span>" : ""}</span>
+        <span class="kb-branch">${repo.branch || ""}</span>
+      </div>
+      <div class="kb-meta">${pills.join("")}</div>
+    `;
+    if (plansGroup) {
+      const sect = document.createElement("div"); sect.className = "kb-section";
+      const titleText = (plansGroup.percent || plansGroup.percent === 0) && plansGroup.milestone
+        ? `${plansGroup.milestone} · ${plansGroup.percent}%`
+        : `${plansGroup.file_count || 0} plan files`;
+      sect.innerHTML = `
+        <div class="kb-section-title"><span>plans</span><span style="text-transform:none">${titleText}</span></div>
+        ${plansGroup.milestone ? `<div class="kb-progress"><span style="width:${plansGroup.percent || 0}%"></span></div>` : ""}
+      `;
+      phases.forEach(ph => {
+        const pe = document.createElement("div");
+        pe.className = "kb-phase " + ph.status;
+        const files = (ph.children || []).filter(c => c.kind === "plan");
+        pe.innerHTML = `
+          <div class="kb-phase-head">
+            <span class="kb-phase-name">${ph.name}</span>
+            <span class="kb-phase-status">${ph.status} · ${files.length}</span>
+          </div>
+          <div class="kb-phase-files"></div>
+        `;
+        const filesEl = pe.querySelector(".kb-phase-files");
+        files.forEach(f => filesEl.appendChild(makeFileRow(f)));
+        pe.querySelector(".kb-phase-head").addEventListener("click", () => pe.classList.toggle("open"));
+        sect.appendChild(pe);
+      });
+      if (looseFiles.length) {
+        const loose = document.createElement("div"); loose.className = "kb-loose";
+        loose.innerHTML = `<div class="kb-section-title" style="margin-top:10px"><span>loose docs</span><span></span></div>`;
+        looseFiles.forEach(f => loose.appendChild(makeFileRow(f)));
+        sect.appendChild(loose);
+      }
+      card.appendChild(sect);
+    }
+    stage.appendChild(card);
+  });
+}
+
+function makeFileRow(f) {
+  const row = document.createElement("div");
+  row.className = "kb-file";
+  row.innerHTML = `<span>${f.name} <span class="ext ${f.ext || ''}">${(f.ext || 'md').toUpperCase()}</span></span><span>${fmtBytes(f.size_bytes)}</span>`;
+  row.addEventListener("click", () => openPlan(f.path, f.rel || f.name));
+  return row;
+}
+
+// ─── Circle packing ───
+function renderCircles(data) {
+  const stage = document.getElementById("circles-stage");
+  stage.innerHTML = "";
+  const { width: W, height: H } = stage.getBoundingClientRect();
+  if (W < 50) return;
+  const D = Math.min(W, H);  // make layout square so circles aren't elongated
+
+  const root = d3.hierarchy(data)
+    .sum(d => d.children ? 0 : (d.value || 1))
+    .sort((a,b) => (b.value||0) - (a.value||0));
+
+  d3.pack().size([D, D]).padding(4)(root);
+
+  // Centered viewBox so root.x ≈ D/2 maps to the SVG center
+  const svg = d3.select(stage).append("svg")
+    .attr("viewBox", `${-D/2} ${-D/2} ${D} ${D}`)
+    .attr("preserveAspectRatio", "xMidYMid meet")
+    .style("background", "#06080c");
+
+  let focus = root, view;
+
+  const node = svg.append("g").selectAll("g")
+    .data(root.descendants().slice(1))
+    .join("g").attr("class", "cp-node");
+
+  node.append("circle")
+    .attr("fill", d => {
+      if (d.data.kind === "phase") return STATUS_COLOR[d.data.status] || "#7d8590";
+      if (d.data.kind === "plan") {
+        const s = d.data.phase_status; if (s) return STATUS_COLOR[s] || "#7d8590";
+        return d.data.ext === "html" ? "#ffa657" : "#58a6ff";
+      }
+      if (d.data.has_process) return "#2ea043";
+      if (d.data.severity === "HIGH") return "#f85149";
+      if (d.data.dirty) return "#d29922";
+      return KIND_COLOR[d.data.kind] || "#21262d";
+    })
+    .attr("fill-opacity", d => d.children ? 0.35 : 0.85)
+    .on("click", (event, d) => {
+      event.stopPropagation();
+      if (!d.children && d.data.kind === "plan" && d.data.path) {
+        openPlan(d.data.path, d.data.rel || d.data.name); return;
+      }
+      if (focus !== d) zoom(d);
+    })
+    .on("mouseover", (e, d) => showTip(`<b>${d.data.name}</b> · ${d.data.kind}${d.data.status ? " · " + d.data.status : ""}${d.data.phase_status ? " · " + d.data.phase_status : ""}${d.data.rel ? "<br>" + d.data.rel : ""}`, e))
+    .on("mousemove", e => { tip.style.left = (e.pageX+12)+"px"; tip.style.top = (e.pageY+12)+"px"; })
+    .on("mouseout", hideTip);
+
+  const label = svg.append("g").style("pointer-events", "none").selectAll("text")
+    .data(root.descendants().slice(1))
+    .join("text")
+    .attr("class", d => "cp-label" + (d.depth > 2 ? " dim" : ""))
+    .style("fill-opacity", d => labelVisible(d, root))
+    .style("display", d => labelVisible(d, root) ? "inline" : "none")
+    .text(d => fitLabel(d.data.name, d.r));
+
+  // Center label showing current focus + back hint
+  const centerLabel = svg.append("text")
+    .attr("text-anchor", "middle")
+    .attr("dy", "-0.4em")
+    .style("font", "600 14px ui-monospace, monospace")
+    .style("fill", "#7d8590")
+    .style("pointer-events", "none");
+  const centerHint = svg.append("text")
+    .attr("text-anchor", "middle")
+    .attr("dy", "1em")
+    .style("font", "10px ui-monospace, monospace")
+    .style("fill", "#7d8590")
+    .style("pointer-events", "none");
+
+  svg.on("click", () => zoom(focus.parent || root));
+  zoomTo([root.x, root.y, root.r * 2]);
+
+  function labelVisible(d, f) {
+    if (d.parent !== f) return false;
+    if (!d.children) return d.r > 14;          // leaf: only if big enough
+    return d.r > 24;                            // branch: skip tiny clusters
+  }
+  function fitLabel(name, radius) {
+    const maxChars = Math.max(3, Math.floor(radius / 4));
+    return name.length > maxChars ? name.slice(0, Math.max(2, maxChars - 1)) + "…" : name;
+  }
+
+  function zoomTo(v) {
+    const k = D / v[2];
+    view = v;
+    node.attr("transform", d => `translate(${(d.x - v[0]) * k},${(d.y - v[1]) * k})`);
+    label.attr("transform", d => `translate(${(d.x - v[0]) * k},${(d.y - v[1]) * k})`);
+    node.select("circle").attr("r", d => d.r * k);
+    label.style("font-size", d => Math.max(9, Math.min(16, d.r * k / 4)) + "px");
+  }
+
+  function zoom(d) {
+    focus = d;
+    centerLabel.text(focus === root ? "" : focus.data.name);
+    centerHint.text(focus === root ? "" : "click background to zoom out");
+    const transition = svg.transition().duration(650)
+      .tween("zoom", () => {
+        const i = d3.interpolateZoom(view, [focus.x, focus.y, focus.r * 2]);
+        return t => zoomTo(i(t));
+      });
+    label.transition(transition)
+      .style("fill-opacity", d2 => labelVisible(d2, focus) ? 1 : 0)
+      .on("start", function(d2) { if (labelVisible(d2, focus)) this.style.display = "inline"; })
+      .on("end", function(d2) { if (!labelVisible(d2, focus)) this.style.display = "none"; });
+  }
+}
+
+// ─── Sunburst (capped visible depth = 3 from current focus) ───
+function renderSunburst(data) {
+  const stage = document.getElementById("sunburst-stage");
+  stage.innerHTML = "";
+  const { width: W, height: H } = stage.getBoundingClientRect();
+  if (W < 50) return;
+  const VISIBLE_DEPTH = 3;             // rings shown around the center
+  const radius = Math.min(W, H) / 2 - 20;
+  const ringR = radius / (VISIBLE_DEPTH + 1);
+
+  const root = d3.hierarchy(data)
+    .sum(d => d.children ? 0 : (d.value || 1))
+    .sort((a,b) => (b.value||0) - (a.value||0));
+  d3.partition().size([2 * Math.PI, root.height + 1])(root);
+  root.each(d => d.current = d);
+
+  const arc = d3.arc()
+    .startAngle(d => d.x0).endAngle(d => d.x1)
+    .padAngle(d => Math.min((d.x1 - d.x0) / 2, 0.004))
+    .padRadius(radius * 1.5)
+    .innerRadius(d => d.y0 * ringR)
+    .outerRadius(d => Math.max(d.y0 * ringR, d.y1 * ringR - 1.5));
+
+  const svg = d3.select(stage).append("svg")
+    .attr("viewBox", `${-W/2} ${-H/2} ${W} ${H}`)
+    .attr("preserveAspectRatio", "xMidYMid meet")
+    .style("background", "#06080c");
+
+  const arcG = svg.append("g");
+  const labelG = svg.append("g").style("pointer-events", "none");
+
+  const path = arcG.selectAll("path")
+    .data(root.descendants().slice(1))
+    .join("path")
+    .attr("class", "sb-arc")
+    .attr("fill", d => arcColor(d))
+    .attr("fill-opacity", d => arcVisible(d.current) ? (d.children ? 0.6 : 0.88) : 0)
+    .attr("pointer-events", d => arcVisible(d.current) ? "auto" : "none")
+    .attr("d", d => arc(d.current))
+    .on("click", clicked)
+    .on("mouseover", (e, d) => showTip(`<b>${d.data.name}</b> · ${d.data.kind}${d.data.status ? " · " + d.data.status : ""}${d.data.phase_status ? " · " + d.data.phase_status : ""}`, e))
+    .on("mousemove", e => { tip.style.left = (e.pageX+12)+"px"; tip.style.top = (e.pageY+12)+"px"; })
+    .on("mouseout", hideTip);
+
+  const label = labelG.selectAll("text")
+    .data(root.descendants().slice(1))
+    .join("text")
+    .attr("class", "sb-label").attr("dy", "0.35em")
+    .attr("fill-opacity", d => +labelVisible(d.current))
+    .attr("transform", d => labelTransform(d.current))
+    .text(d => fitArcLabel(d, d.current));
+
+  // Center circle = "back" / current focus indicator
+  const center = svg.append("circle").datum(root)
+    .attr("r", ringR * 0.95)
+    .attr("fill", "#0d1117").attr("stroke", "#30363d")
+    .attr("pointer-events", "all").style("cursor", "pointer")
+    .on("click", clicked);
+  const centerName = svg.append("text").attr("text-anchor", "middle").attr("dy", "-0.3em")
+    .attr("fill", "#e6edf3").style("font", "600 14px ui-monospace, monospace")
+    .style("pointer-events", "none").text("~");
+  const centerHint = svg.append("text").attr("text-anchor", "middle").attr("dy", "1.1em")
+    .attr("fill", "#7d8590").style("font", "10px ui-monospace, monospace")
+    .style("pointer-events", "none").text("scope");
+
+  function arcColor(d) {
+    if (d.data.kind === "phase") return STATUS_COLOR[d.data.status] || "#7d8590";
+    if (d.data.kind === "plan") return STATUS_COLOR[d.data.phase_status || "draft"];
+    if (d.data.has_process) return "#2ea043";
+    return KIND_COLOR[d.data.kind] || "#3a3f4b";
+  }
+
+  function clicked(event, p) {
+    if (!p.children && p.data.kind === "plan" && p.data.path) {
+      openPlan(p.data.path, p.data.rel || p.data.name); return;
+    }
+    if (event) event.stopPropagation();
+    // refocus: p becomes new center
+    center.datum(p.parent || root);
+    centerName.text(p === root ? "~" : p.data.name);
+    centerHint.text(p === root ? "scope" : "click center to zoom out");
+
+    root.each(d => d.target = {
+      x0: Math.max(0, Math.min(1, (d.x0 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
+      x1: Math.max(0, Math.min(1, (d.x1 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
+      y0: Math.max(0, d.y0 - p.depth),
+      y1: Math.max(0, d.y1 - p.depth),
+    });
+    const t = svg.transition().duration(650);
+    path.transition(t)
+      .tween("data", d => { const i = d3.interpolate(d.current, d.target); return t2 => d.current = i(t2); })
+      .filter(function(d) { return +this.getAttribute("fill-opacity") || arcVisible(d.target); })
+      .attr("fill-opacity", d => arcVisible(d.target) ? (d.children ? 0.6 : 0.88) : 0)
+      .attr("pointer-events", d => arcVisible(d.target) ? "auto" : "none")
+      .attrTween("d", d => () => arc(d.current));
+    label.transition(t)
+      .filter(function(d) { return +this.getAttribute("fill-opacity") || labelVisible(d.target); })
+      .attr("fill-opacity", d => +labelVisible(d.target))
+      .attrTween("transform", d => () => labelTransform(d.current))
+      .on("end", function(d) {
+        // refit label text after transition
+        d3.select(this).text(fitArcLabel(d, d.target));
+      });
+  }
+
+  function arcVisible(d) {
+    return d.y1 > 0 && d.y1 <= VISIBLE_DEPTH + 1 && d.y0 >= 1 && d.x1 > d.x0;
+  }
+
+  // Only show a label if its arc has enough screen-area to actually read it
+  function labelVisible(d) {
+    if (!arcVisible(d)) return false;
+    const arcLen = (d.x1 - d.x0) * ((d.y0 + d.y1) / 2) * ringR;  // mid-radius arc length in px
+    const radialThickness = (d.y1 - d.y0) * ringR;
+    return arcLen > 36 && radialThickness > 12;
+  }
+
+  function labelTransform(d) {
+    const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+    const y = (d.y0 + d.y1) / 2 * ringR;
+    return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
+  }
+
+  // truncate to available arc length so labels never overflow
+  function fitArcLabel(d, projected) {
+    const arcLen = (projected.x1 - projected.x0) * ((projected.y0 + projected.y1) / 2) * ringR;
+    const maxChars = Math.max(3, Math.floor(arcLen / 6.2));
+    const name = d.data.name;
+    if (!name) return "";
+    return name.length > maxChars ? name.slice(0, Math.max(2, maxChars - 1)) + "…" : name;
+  }
+}
+
+// ─── Sankey: .claude → projects → status ───
+function renderSankey(data) {
+  const stage = document.getElementById("sankey-stage");
+  stage.innerHTML = "";
+  const { width: W, height: H } = stage.getBoundingClientRect();
+  if (W < 50) return;
+
+  const projects = (data.children.find(c => c.name === "projects")?.children || [])
+    .filter(c => c.kind === "repo");
+  const claudeRegion = data.children.find(c => c.name === ".claude");
+
+  const nodes = []; const idMap = new Map();
+  function add(name, kind) {
+    if (!idMap.has(name)) { idMap.set(name, nodes.length); nodes.push({ name, kind }); }
+    return idMap.get(name);
+  }
+  const links = [];
+
+  const claudeId = add(".claude", "claude");
+  const STATUSES = ["complete", "iterating", "planning", "draft", "no phases"];
+
+  projects.forEach(p => {
+    const plansGroup = p.children?.find(g => g.name && g.name.startsWith("plans"));
+    const phases = (plansGroup?.children || []).filter(c => c.kind === "phase");
+    const fileCount = plansGroup?.file_count || 0;
+    const flow = Math.max(1, phases.length || (fileCount > 0 ? 1 : 1));
+    const pid = add(p.name, "repo");
+    links.push({ source: claudeId, target: pid, value: flow });
+    if (phases.length === 0) {
+      const sid = add("status:no phases", "status:draft");
+      links.push({ source: pid, target: sid, value: 1 });
+    } else {
+      const counts = {};
+      phases.forEach(ph => { counts[ph.status] = (counts[ph.status]||0) + 1; });
+      Object.entries(counts).forEach(([status, n]) => {
+        const sid = add("status:" + status, "status:" + status);
+        links.push({ source: pid, target: sid, value: n });
+      });
+    }
+  });
+
+  const svg = d3.select(stage).append("svg").attr("viewBox", `0 0 ${W} ${H}`);
+  const sankey = d3.sankey()
+    .nodeWidth(18).nodePadding(10)
+    .extent([[120, 24], [W - 140, H - 24]]);
+
+  const graph = sankey({
+    nodes: nodes.map(n => Object.assign({}, n)),
+    links: links.map(l => Object.assign({}, l)),
+  });
+
+  svg.append("g").selectAll("path").data(graph.links).join("path")
+    .attr("class", "sk-link")
+    .attr("d", d3.sankeyLinkHorizontal())
+    .attr("stroke", d => {
+      if (d.target.kind?.startsWith("status:")) return STATUS_COLOR[d.target.kind.split(":")[1]] || "#7d8590";
+      if (d.source.kind === "claude") return "#58a6ff";
+      return "#2d6cdf";
+    })
+    .attr("stroke-width", d => Math.max(1, d.width))
+    .on("mouseover", (e, d) => showTip(`${d.source.name} → ${d.target.name.replace("status:","")}<br>${d.value} phase${d.value>1?"s":""}`, e))
+    .on("mousemove", e => { tip.style.left = (e.pageX+12)+"px"; tip.style.top = (e.pageY+12)+"px"; })
+    .on("mouseout", hideTip);
+
+  const node = svg.append("g").selectAll("g").data(graph.nodes).join("g").attr("class", "sk-node");
+  node.append("rect")
+    .attr("x", d => d.x0).attr("y", d => d.y0)
+    .attr("height", d => Math.max(1, d.y1 - d.y0))
+    .attr("width", d => d.x1 - d.x0)
+    .attr("fill", d => {
+      if (d.kind === "claude") return "#58a6ff";
+      if (d.kind?.startsWith("status:")) return STATUS_COLOR[d.kind.split(":")[1]] || "#7d8590";
+      return "#2d6cdf";
+    });
+  node.append("text")
+    .attr("x", d => d.x0 < W / 2 ? d.x1 + 6 : d.x0 - 6)
+    .attr("y", d => (d.y0 + d.y1) / 2)
+    .attr("dy", "0.35em")
+    .attr("text-anchor", d => d.x0 < W / 2 ? "start" : "end")
+    .text(d => d.name.replace("status:", ""));
+}
+
+window.addEventListener("resize", () => {
+  if (!_DATA) return;
+  const active = document.querySelector(".proto-tab.active").dataset.proto;
+  if (active === "circles") renderCircles(_DATA);
+  if (active === "sunburst") renderSunburst(_DATA);
+  if (active === "sankey") renderSankey(_DATA);
+});
+</script>
+</body>
+</html>

@@ -1,8 +1,35 @@
 # scope v2 PRD — "See it" release
 
-**Status:** Draft · 2026-05-12
+**Status:** ✅ Shipped (with deviations) · 2026-05-12 · merged in PR #4
+**Successor:** [v2.5 PRD](PRD-v2.5.md) — plan-document layer + circle packing / sunburst
 **Predecessor:** [PRD v1.1](../PRD.md) (shipped 2026-05-12, 14 commits, 49 tests)
 **Theme:** One visual that answers "what's the state of my whole Claude Code world?" at a glance.
+
+## Implementation deviations from this spec
+
+The Map shipped, but the visualization choice evolved during implementation:
+
+| Spec said | What shipped | Why |
+|---|---|---|
+| Dagre top-down node-link tree | Compound regions w/ fcose layout (v2), then **circle packing + sunburst** (v2.5) | Dagre packed config files into a thin strip; users couldn't scan repos. Region rendering became cramped; treemap labels overlapped. Circle packing / sunburst handle 8+ repos × 50+ plan files cleanly. |
+| Cytoscape.js + cytoscape-dagre | **D3 v7** (`d3-hierarchy.pack`, `d3-partition`); Cytoscape dropped in v2.5 | D3 handles zoom-based label resizing and recursive depth limits more cleanly than Cytoscape's compound-node model. |
+| "Click a node → switch to relevant existing tab" | Click a plan-file leaf → **render the markdown inline in a modal** (v2.5 addition). Click a process → still switches to Processes tab. | Plan files are the primary thing users want to read; switching tabs to find them is friction. |
+| One layout (dagre) | Toggleable views: **Circles ◉ / Sunburst ◐** | Both views answer different questions: circles for "how big is each project", sunburst for "what's the shape of the plan portfolio". |
+
+All other v2 done-criteria (next section) met or exceeded.
+
+## Done criteria — status
+
+| # | Criterion | Status |
+|---|---|---|
+| 1 | All v1 tests passing + new `test_graph_builder.py` and `test_api_graph.py` | ✅ 76 passing (v1: 49 + v2 graph: 12 + v2.5 tree: 8 + plan modal + new) |
+| 2 | `python app.py` boots, Map renders quickly on a typical portfolio | ✅ < 500 ms for 8 repos × 54 plan files |
+| 3 | Every node from existing scanners appears in the Map | ✅ |
+| 4 | Red/yellow rings on Insights findings | ✅ (now: fill-color tinted on HIGH/MED) |
+| 5 | Pulsing green dot on repo with running `claude` process | ✅ (now: green fill + glow on the matching circle/arc) |
+| 6 | Click repo → switch to Git State tab + scroll row into view | ⚠️ Behavior moved: clicking a repo *zooms in* on the map; clicking a plan-file *opens a markdown modal*. Process clicks still tab-switch. |
+| 7 | Legend visible and accurate | ✅ |
+| 8 | No new external HTTP calls; 100% local | ✅ (D3 + marked CDN'd at first load; no runtime egress) |
 
 ---
 
