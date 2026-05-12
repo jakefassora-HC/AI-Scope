@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>scope</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <h1>scope</h1>
+    <button id="refresh">↻ Refresh</button>
+  </header>
+
+  <section id="insights" class="panel">
+    <h2>Insights</h2>
+    <div id="insights-body">Loading…</div>
+  </section>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="context">Claude Context</button>
+    <button class="tab" data-tab="browser">File Browser</button>
+    <button class="tab" data-tab="processes">Processes</button>
+    <button class="tab" data-tab="git">Git State</button>
+  </nav>
+
+  <section id="tab-context" class="tab-panel active">
+    <h2>Per-turn token budget</h2>
+    <div id="budget">—</div>
+    <h2>Global config (<code>~/.claude/</code>)</h2>
+    <div id="claude-dir">Loading…</div>
+    <h2>Project CLAUDE.md files</h2>
+    <div id="project-md">Loading…</div>
+  </section>
+
+  <section id="tab-browser" class="tab-panel"><p>File browser (Phase 3).</p></section>
+  <section id="tab-processes" class="tab-panel"><p>Processes (Phase 3).</p></section>
+  <section id="tab-git" class="tab-panel"><p>Git state (Phase 4).</p></section>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
