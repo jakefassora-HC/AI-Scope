@@ -62,3 +62,56 @@ code { background: var(--panel); padding: 2px 6px; border-radius: 4px;
   margin: 8px 0 4px 0;
 }
 .budget-caption { color: var(--muted); font-size: 13px; }
+
+/* Cheat-sheet */
+.cheatsheet-head { display: flex; justify-content: space-between; align-items: baseline; }
+.cheatsheet-head h2 { margin-top: 0; }
+#cheatsheet-body.collapsed { display: none; }
+.steps { list-style: none; counter-reset: step; padding: 0; margin: 8px 0 0 0; }
+.steps > li {
+  counter-increment: step;
+  position: relative;
+  padding: 14px 16px 14px 56px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  background: rgba(13, 17, 23, 0.5);
+}
+.steps > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 16px; top: 14px;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg);
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px;
+}
+.steps h3 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: var(--text);
+  font-weight: 600;
+}
+.steps p { margin: 4px 0 8px 0; }
+.steps ul { margin: 4px 0 0 0; padding-left: 18px; }
+.steps ul li { margin-bottom: 6px; }
+.steps .muted { color: var(--muted); font-size: 13px; }
+.steps pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin: 6px 0;
+  overflow-x: auto;
+}
+.steps pre code {
+  background: transparent;
+  padding: 0;
+  color: var(--text);
+  font-size: 12.5px;
+  white-space: pre;
+}

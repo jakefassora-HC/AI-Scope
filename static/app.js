@@ -199,3 +199,22 @@ function renderInsights() {
 var originalLoadAll = loadAll;
 loadAll = function() { originalLoadAll(); renderInsights(); };
 renderInsights();
+
+// Cheat-sheet collapse toggle (persists across reloads)
+(function() {
+  var toggle = document.getElementById("cheatsheet-toggle");
+  var body = document.getElementById("cheatsheet-body");
+  if (!toggle || !body) return;
+  var KEY = "scope.cheatsheet.collapsed";
+  function apply(collapsed) {
+    body.classList.toggle("collapsed", collapsed);
+    toggle.textContent = collapsed ? "Show" : "Hide";
+    toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  }
+  apply(localStorage.getItem(KEY) === "1");
+  toggle.addEventListener("click", function() {
+    var nowCollapsed = !body.classList.contains("collapsed");
+    localStorage.setItem(KEY, nowCollapsed ? "1" : "0");
+    apply(nowCollapsed);
+  });
+})();
