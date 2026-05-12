@@ -165,7 +165,7 @@ function showTip(html, e) { tip.innerHTML = html; tip.style.display = "block";
   tip.style.left = (e.pageX + 12) + "px"; tip.style.top = (e.pageY + 12) + "px"; }
 function hideTip() { tip.style.display = "none"; }
 
-const STATUS_COLOR = { complete: "#3fb950", iterating: "#58a6ff", planning: "#8957e5", draft: "#7d8590" };
+const STATUS_COLOR = { done: "#3fb950", active: "#58a6ff", idle: "#d29922" };
 const KIND_COLOR = {
   root: "#0d1117", region: "#1c2230", repo: "#2d6cdf", worktree: "#1f6feb",
   group: "#3b3654", plan: "#7d8590", phase: "#3fb950", process: "#2ea043",

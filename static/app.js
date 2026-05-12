@@ -237,7 +237,15 @@ var mapLoaded = false;
 var _mapData = null;
 var _mapView = "circles";
 
-var STATUS_COLOR = { complete: "#3fb950", iterating: "#58a6ff", planning: "#8957e5", draft: "#7d8590" };
+// 3-status taxonomy (KISS): done / active / idle
+// done   = green  (handled, no action needed)
+// active = blue   (claude working OR recent commits)
+// idle   = amber  (needs your attention — drafted but not shipped)
+var STATUS_COLOR = { done: "#3fb950", active: "#58a6ff", idle: "#d29922" };
+// claude is currently editing a file → orange glow on top of status color
+var ACTIVE_EDIT_COLOR = "#ffa657";
+// HIGH severity overlay
+var HIGH_COLOR = "#f85149";
 var KIND_COLOR = {
   root: "#0d1117", region: "#1c2230", repo: "#2d6cdf", worktree: "#1f6feb",
   group: "#3b3654", plan: "#7d8590", phase: "#3fb950", process: "#2ea043",
@@ -300,21 +308,27 @@ function renderCircles(data) {
   node.append("circle")
     .attr("fill", function(d){
       var k = d.data.kind;
-      if (k === "plan" && d.data.claude_active) return "#ffa657";
-      if (k === "phase") return STATUS_COLOR[d.data.status] || "#7d8590";
+      if (k === "plan" && d.data.claude_active) return ACTIVE_EDIT_COLOR;
+      if (k === "phase") return STATUS_COLOR[d.data.status] || STATUS_COLOR.idle;
       if (k === "plan") {
-        var s = d.data.phase_status; if (s) return STATUS_COLOR[s] || "#7d8590";
-        return d.data.ext === "html" ? "#ffa657" : "#58a6ff";
+        var s = d.data.phase_status; if (s) return STATUS_COLOR[s] || STATUS_COLOR.idle;
+        return d.data.ext === "html" ? ACTIVE_EDIT_COLOR : STATUS_COLOR.active;
       }
       if (d.data.has_process) return "#2ea043";
-      if (d.data.severity === "HIGH") return "#f85149";
-      if (d.data.dirty) return "#d29922";
+      if (d.data.severity === "HIGH") return HIGH_COLOR;
+      if (d.data.dirty) return STATUS_COLOR.idle;
       return KIND_COLOR[k] || "#21262d";
     })
-    .attr("stroke", function(d){ return d.data.claude_active ? "#ffa657" : null; })
+    .attr("stroke", function(d){ return d.data.claude_active ? ACTIVE_EDIT_COLOR : null; })
     .attr("stroke-width", function(d){ return d.data.claude_active ? 2 : 0; })
-    .style("filter", function(d){ return d.data.claude_active ? "drop-shadow(0 0 6px #ffa657)" : null; })
-    .attr("fill-opacity", function(d){ return d.children ? 0.35 : 0.85; })
+    .style("filter", function(d){ return d.data.claude_active ? "drop-shadow(0 0 6px " + ACTIVE_EDIT_COLOR + ")" : null; })
+    .attr("fill-opacity", function(d){
+      // Branches: a touch translucent so children read; leaves: full strength
+      if (!d.children) return 0.92;
+      // idle phases stay fully visible (we want them to grab attention)
+      if (d.data.kind === "phase" && d.data.status === "idle") return 0.75;
+      return d.data.kind === "phase" ? 0.7 : 0.55;
+    })
     .on("click", function(event, d){
       event.stopPropagation();
       if (!d.children && d.data.kind === "plan" && d.data.path) {
@@ -413,7 +427,12 @@ function renderSunburst(data) {
     .join("path")
     .attr("class", "sb-arc")
     .attr("fill", arcColor)
-    .attr("fill-opacity", function(d){ return arcVisible(d.current) ? (d.children ? 0.6 : 0.88) : 0; })
+    .attr("fill-opacity", function(d){
+      if (!arcVisible(d.current)) return 0;
+      if (!d.children) return 0.95;                       // leaves: vibrant
+      if (d.data.kind === "phase") return 0.85;           // phases: prominent so status reads at a glance
+      return 0.65;                                         // other branches (regions/repos/groups)
+    })
     .attr("pointer-events", function(d){ return arcVisible(d.current) ? "auto" : "none"; })
     .attr("d", function(d){ return arc(d.current); })
     .on("click", clicked)
@@ -447,10 +466,12 @@ function renderSunburst(data) {
     .style("pointer-events", "none").text("scope");
 
   function arcColor(d) {
-    if (d.data.kind === "plan" && d.data.claude_active) return "#ffa657";
-    if (d.data.kind === "phase") return STATUS_COLOR[d.data.status] || "#7d8590";
-    if (d.data.kind === "plan") return STATUS_COLOR[d.data.phase_status || "draft"];
+    if (d.data.kind === "plan" && d.data.claude_active) return ACTIVE_EDIT_COLOR;
+    if (d.data.kind === "phase") return STATUS_COLOR[d.data.status] || STATUS_COLOR.idle;
+    if (d.data.kind === "plan") return STATUS_COLOR[d.data.phase_status || "idle"];
     if (d.data.has_process) return "#2ea043";
+    if (d.data.severity === "HIGH") return HIGH_COLOR;
+    if (d.data.dirty) return STATUS_COLOR.idle;
     return KIND_COLOR[d.data.kind] || "#3a3f4b";
   }
 
@@ -474,7 +495,12 @@ function renderSunburst(data) {
     path.transition(tr)
       .tween("data", function(d){ var i = d3.interpolate(d.current, d.target); return function(t){ d.current = i(t); }; })
       .filter(function(d){ return +this.getAttribute("fill-opacity") || arcVisible(d.target); })
-      .attr("fill-opacity", function(d){ return arcVisible(d.target) ? (d.children ? 0.6 : 0.88) : 0; })
+      .attr("fill-opacity", function(d){
+        if (!arcVisible(d.target)) return 0;
+        if (!d.children) return 0.95;
+        if (d.data.kind === "phase") return 0.85;
+        return 0.65;
+      })
       .attr("pointer-events", function(d){ return arcVisible(d.target) ? "auto" : "none"; })
       .attrTween("d", function(d){ return function(){ return arc(d.current); }; });
     label.transition(tr)
