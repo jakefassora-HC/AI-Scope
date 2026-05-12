@@ -1,6 +1,7 @@
 """scope — Flask entrypoint."""
+import os
 from pathlib import Path
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, abort
 
 from scope.config_scanner import scan_claude_dir, find_claude_md_files
 from scope.file_browser import list_dir
@@ -10,9 +11,38 @@ from scope.rules import evaluate_all
 from scope.tree_builder import build_tree
 from scope.plan_scanner import scan_planning, list_plan_files
 from scope.activity_scanner import scan_activity
+from scope.exclusions import is_excluded
+from scope.redact import redact
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 HOME = Path.home()
+
+# Hosts we accept Host-header for. Anything else → 403 (DNS rebinding defense).
+_ALLOWED_HOSTS = {"127.0.0.1", "127.0.0.1:8765", "localhost", "localhost:8765"}
+
+
+@app.before_request
+def _validate_host():
+    """Reject requests whose Host header isn't localhost.
+
+    Mitigates DNS rebinding: a malicious site can resolve attacker.example
+    to 127.0.0.1, then make `fetch('http://attacker.example:8765/api/plan')`
+    from the user's browser — bypassing same-origin because Origin still
+    matches the attacker domain. Strict Host-header allow-listing kills that.
+    """
+    host = (request.host or "").lower()
+    if host not in _ALLOWED_HOSTS:
+        abort(403)
+
+
+@app.after_request
+def _no_store(resp):
+    """Prevent any caching of scope responses (sensitive local data)."""
+    resp.headers["Cache-Control"] = "no-store, private, max-age=0"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    return resp
 
 # Cached set of plan file paths from the last /api/treemap response.
 # /api/activity stats these to detect recent edits without rescanning.
@@ -149,22 +179,38 @@ def api_activity():
 
 @app.get("/api/plan")
 def api_plan():
-    """Return raw content of a plan document. Sandbox to HOME."""
+    """Return raw content of a plan document.
+
+    Defense layers:
+      1. Path must resolve under $HOME.
+      2. Path must NOT match the hard-coded deny list (ssh/aws/env/credentials/...).
+      3. Extension must be markdown / html / txt.
+      4. Size capped at 2 MB.
+      5. Content passed through secret redactor before serialization.
+    """
     raw = request.args.get("path", "")
     try:
         p = Path(raw).resolve()
+        # 1. HOME sandbox
         if HOME.resolve() not in p.parents and p != HOME.resolve():
             return jsonify({"error": "outside HOME"}), 403
+        # 2. Deny list — same rules /api/browse enforces
+        if is_excluded(p):
+            return jsonify({"error": "denied path"}), 403
         if not p.is_file():
             return jsonify({"error": "not a file"}), 404
+        # 3. Extension allow-list
         if p.suffix.lower() not in (".md", ".html", ".htm", ".txt"):
             return jsonify({"error": "unsupported file type"}), 400
+        # 4. Size cap
         if p.stat().st_size > 2_000_000:
             return jsonify({"error": "too large"}), 413
+        # 5. Read + redact secrets before responding
+        content = p.read_text(encoding="utf-8", errors="replace")
         return jsonify({
             "path": str(p),
             "ext": p.suffix.lower().lstrip("."),
-            "content": p.read_text(encoding="utf-8", errors="replace"),
+            "content": redact(content),
         })
     except (OSError, ValueError) as e:
         return jsonify({"error": str(e)}), 400
@@ -181,4 +227,8 @@ def prototype():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8765, debug=True)
+    # Debug mode is OFF by default — the Werkzeug debugger console is a remote
+    # code execution risk if combined with any Host/CORS bypass. Opt in with
+    # SCOPE_DEBUG=1 for local development only.
+    debug = os.environ.get("SCOPE_DEBUG") == "1"
+    app.run(host="127.0.0.1", port=8765, debug=debug)

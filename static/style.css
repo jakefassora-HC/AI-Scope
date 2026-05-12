@@ -202,7 +202,9 @@ code { background: var(--panel); padding: 2px 6px; border-radius: 4px;
                width: 28px; height: 28px; border-radius: 4px; cursor: pointer; padding: 0;
                font-size: 16px; line-height: 1; }
 .modal-close:hover { color: var(--text); border-color: var(--red); }
-.modal-body { flex: 1; overflow: auto; padding: 20px 28px; font-size: 14px; line-height: 1.6; }
+.modal-body { flex: 1; overflow: hidden; padding: 0; font-size: 14px; line-height: 1.6;
+              display: flex; min-height: 0; }
+.modal-body iframe { flex: 1; }
 .modal-body h1 { font-size: 24px; margin-top: 0; color: var(--text); }
 .modal-body h2 { font-size: 18px; margin-top: 24px; color: var(--accent);
                  padding-bottom: 6px; border-bottom: 1px solid var(--border); }

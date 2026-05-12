@@ -260,18 +260,72 @@ function _showTip(html, e) {
 }
 function _hideTip() { _mapTooltip.style.display = "none"; }
 
-// Plan viewer modal
+// Plan viewer modal — renders content inside a sandboxed iframe (sandbox=""
+// disallows scripts, popups, navigation, top-window access). Markdown is
+// converted to HTML on the parent page first, then loaded as srcdoc. This
+// neutralizes any <script>/<iframe>/onclick payload a plan file may contain.
+function _escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function(c){
+    return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[c];
+  });
+}
+function _modalDoc(bodyHtml) {
+  // Inline the same styles the modal uses so the sandboxed doc looks identical.
+  return [
+    "<!doctype html><html><head><meta charset='utf-8'><base target='_blank'>",
+    "<style>",
+    "body{font:14px/1.6 -apple-system,system-ui,sans-serif;color:#e6edf3;",
+    "background:#161b22;margin:0;padding:20px 28px;}",
+    "h1{font-size:24px;margin-top:0}",
+    "h2{font-size:18px;margin-top:24px;color:#58a6ff;padding-bottom:6px;border-bottom:1px solid #30363d}",
+    "h3{font-size:15px;margin-top:18px}",
+    "code{background:#0d1117;padding:2px 6px;font-family:ui-monospace,monospace}",
+    "pre{background:#0d1117;padding:12px 14px;border-radius:6px;overflow-x:auto;",
+    "border:1px solid #30363d;margin:10px 0}",
+    "pre code{background:transparent;padding:0}",
+    "table{border-collapse:collapse;margin:10px 0}",
+    "th,td{border:1px solid #30363d;padding:6px 10px}",
+    "th{background:#0d1117}",
+    "blockquote{border-left:3px solid #58a6ff;margin:10px 0;padding:6px 16px;",
+    "color:#7d8590;background:rgba(88,166,255,0.05)}",
+    "ul,ol{padding-left:24px}a{color:#58a6ff}img{max-width:100%}",
+    "hr{border:none;border-top:1px solid #30363d;margin:20px 0}",
+    "</style></head><body>",
+    bodyHtml,
+    "</body></html>"
+  ].join("");
+}
+
 function openPlan(path, name) {
   var titleEl = document.getElementById("plan-modal-title");
   var bodyEl = document.getElementById("plan-modal-body");
   titleEl.textContent = name || path;
-  bodyEl.innerHTML = "<p style='color:var(--muted)'>Loading…</p>";
+  bodyEl.innerHTML = "<p style='color:var(--muted);padding:18px'>Loading…</p>";
   document.getElementById("plan-modal-bg").classList.add("open");
   fetch("/api/plan?path=" + encodeURIComponent(path)).then(function(r){return r.json();}).then(function(d){
-    if (d.error) { bodyEl.innerHTML = "<p style='color:var(--red)'>" + d.error + "</p>"; return; }
-    if (d.ext === "md" && typeof marked !== "undefined") bodyEl.innerHTML = marked.parse(d.content);
-    else if (d.ext === "html" || d.ext === "htm") bodyEl.innerHTML = d.content;
-    else bodyEl.innerHTML = "<pre>" + d.content.replace(/</g, "&lt;") + "</pre>";
+    if (d.error) {
+      bodyEl.innerHTML = "<p style='color:var(--red);padding:18px'>" + _escapeHtml(d.error) + "</p>";
+      return;
+    }
+    var inner;
+    if (d.ext === "md" && typeof marked !== "undefined") {
+      inner = marked.parse(d.content);
+    } else if (d.ext === "html" || d.ext === "htm") {
+      inner = d.content; // raw — sandboxed iframe will defang it
+    } else {
+      inner = "<pre>" + _escapeHtml(d.content) + "</pre>";
+    }
+    // sandbox="" means: no scripts, no forms, no popups, no top-nav. Origin
+    // becomes a unique null origin so even if the page tries `fetch('/api/plan')`,
+    // the call is cross-origin and the response is not readable.
+    var iframe = document.createElement("iframe");
+    iframe.setAttribute("sandbox", "");
+    iframe.style.cssText = "width:100%;height:100%;border:0;background:#161b22;display:block";
+    iframe.srcdoc = _modalDoc(inner);
+    bodyEl.innerHTML = "";
+    bodyEl.appendChild(iframe);
+  }).catch(function(err){
+    bodyEl.innerHTML = "<p style='color:var(--red);padding:18px'>Failed to load: " + _escapeHtml(err.message) + "</p>";
   });
 }
 function closePlanModal() {
