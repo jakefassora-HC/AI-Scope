@@ -4,10 +4,7 @@
   <meta charset="utf-8">
   <title>scope</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <script defer src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/layout-base@2.0.1/layout-base.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/cose-base@2.2.0/cose-base.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 </head>
 <body>
   <header>
@@ -102,14 +99,18 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
 
   <section id="tab-map" class="tab-panel">
     <div class="map-toolbar">
-      <h2 style="margin:0">System Map</h2>
+      <div id="map-breadcrumb" class="map-breadcrumb"><span class="crumb">~</span></div>
       <div class="map-legend">
-        <span><i class="dot dot-high"></i> HIGH</span>
-        <span><i class="dot dot-med"></i> MED</span>
+        <span><i class="dot dot-complete"></i> complete</span>
+        <span><i class="dot dot-iterating"></i> iterating</span>
+        <span><i class="dot dot-planning"></i> planning</span>
+        <span><i class="dot dot-dirty"></i> dirty</span>
         <span><i class="dot dot-proc"></i> claude running</span>
+        <span><i class="dot dot-high"></i> HIGH</span>
       </div>
     </div>
     <div id="map-canvas" class="map-canvas">Loading…</div>
+    <div id="map-detail" class="map-detail"></div>
   </section>
 
   <script>window.HOME_PATH = "{{ home_path }}";</script>

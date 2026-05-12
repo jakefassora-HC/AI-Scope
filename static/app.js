@@ -219,9 +219,8 @@ renderInsights();
   });
 })();
 
-// ── System Map (Phase 3) ──────────────────────────────────────────────────────
+// ── System Map — D3 zoomable treemap ─────────────────────────────────────────
 
-// Tooltip element — created once, reused
 var _mapTooltip = (function() {
   var el = document.createElement("div");
   el.className = "map-tooltip";
@@ -229,275 +228,295 @@ var _mapTooltip = (function() {
   return el;
 })();
 
-// Navigate to a named tab by clicking its button
 function activateTab(name) {
   var btn = document.querySelector("[data-tab='" + name + "']");
   if (btn) btn.click();
 }
 
-// Scroll the .file-row whose first-span title contains path (or basename) into view
-function highlightRowByPath(path) {
-  if (!path) return;
-  var base = path.replace(/^.*\//, "");
-  var rows = document.querySelectorAll(".file-row");
-  var found = null;
-  for (var i = 0; i < rows.length; i++) {
-    var span = rows[i].querySelector("span");
-    if (!span) continue;
-    var t = span.getAttribute("title") || "";
-    var txt = span.textContent || "";
-    if (t.indexOf(path) !== -1 || txt.indexOf(base) !== -1) {
-      found = rows[i];
-      break;
-    }
-  }
-  if (!found) return;
-  found.scrollIntoView({ behavior: "smooth", block: "center" });
-  found.classList.add("row-highlight");
-  setTimeout(function() { found.classList.remove("row-highlight"); }, 1500);
+var mapLoaded = false;
+var _tmState = null; // {root, current, svg, w, h}
+
+function _kindClass(d) {
+  var kind = d.data.kind;
+  if (kind === "phase") return "tm-phase-" + (d.data.status || "draft");
+  return "tm-" + kind;
 }
 
-var mapLoaded = false;
-var _cy = null;
+function _decorateClasses(d) {
+  var classes = ["tm-rect", _kindClass(d)];
+  if (d.data.has_process) classes.push("has-process");
+  if (d.data.dirty) classes.push("is-dirty");
+  if (d.data.severity === "HIGH") classes.push("sev-HIGH");
+  else if (d.data.severity === "MED") classes.push("sev-MED");
+  return classes.join(" ");
+}
 
-function loadMap() {
-  if (typeof cytoscape === "undefined") {
-    setTimeout(loadMap, 100);
-    return;
-  }
-  // Register fcose layout extension (idempotent guard)
-  if (window.cytoscapeFcose && !window._fcoseRegistered) {
-    cytoscape.use(window.cytoscapeFcose);
-    window._fcoseRegistered = true;
-  }
-
-  fetch("/api/graph").then(function(r) { return r.json(); }).then(function(data) {
-    var canvas = document.getElementById("map-canvas");
-    if (!canvas) return;
-
-    // Empty state (baseline is 3 nodes: home + region:.claude + region:projects)
-    if (!data.nodes || data.nodes.length <= 3) {
-      canvas.innerHTML =
-        "<p style='text-align:center;padding:40px;color:var(--muted)'>" +
-        "Map is empty. Create a project under <code>~/projects/</code> " +
-        "or add a CLAUDE.md to populate it.</p>";
-      return;
+function _renderBreadcrumb(path, onClick) {
+  var bc = document.getElementById("map-breadcrumb");
+  bc.innerHTML = "";
+  path.forEach(function(node, i) {
+    if (i > 0) {
+      var sep = document.createElement("span");
+      sep.className = "sep"; sep.textContent = "›";
+      bc.appendChild(sep);
     }
+    var c = document.createElement("span");
+    c.className = "crumb" + (i === path.length - 1 ? " current" : "");
+    c.textContent = node.data.name;
+    c.addEventListener("click", function() { onClick(node); });
+    bc.appendChild(c);
+  });
+}
 
-    canvas.innerHTML = "";
+function _renderDetail(d) {
+  var el = document.getElementById("map-detail");
+  if (!d) { el.innerHTML = '<span style="color:var(--muted)">Click a tile to drill in. Click the background or breadcrumb to zoom out.</span>'; return; }
+  var kind = d.data.kind;
+  var html = '<div class="md-title">' + d.data.name + ' <span style="color:var(--muted);font-weight:400">· ' + kind + '</span></div>';
+  var meta = [];
+  if (kind === "repo" || kind === "worktree") {
+    if (d.data.branch) meta.push("branch: <code>" + d.data.branch + "</code>");
+    var status = [];
+    if (d.data.dirty) status.push(d.data.dirty + " dirty");
+    if (d.data.untracked) status.push(d.data.untracked + " untracked");
+    if (d.data.ahead) status.push("↑" + d.data.ahead);
+    if (d.data.behind) status.push("↓" + d.data.behind);
+    meta.push(status.length ? status.join(", ") : '<span style="color:var(--green)">clean</span>');
+    if (d.data.stale) meta.push('<span style="color:var(--amber)">STALE</span>');
+    if (d.data.has_process) meta.push('<span style="color:#2ea043">● claude running</span>');
+  } else if (kind === "file") {
+    if (d.data.path) meta.push("<code>" + d.data.path + "</code>");
+    meta.push(fmtBytes(d.data.size_bytes || 0));
+    meta.push("~" + (d.data.tokens_est || 0).toLocaleString() + " tok");
+    if (d.data.age_days !== undefined) meta.push(d.data.age_days + "d old");
+  } else if (kind === "phase") {
+    meta.push("status: <strong>" + d.data.status + "</strong>");
+    if (d.data.path) meta.push("<code>" + d.data.path + "</code>");
+  } else if (kind === "group" && d.data.percent !== undefined) {
+    meta.push(d.data.completed_phases + "/" + d.data.total_phases + " phases");
+    meta.push('<span class="md-progress"><span style="width:' + d.data.percent + '%"></span></span> ' + d.data.percent + "%");
+    if (d.data.subtitle) meta.push(d.data.subtitle);
+  } else if (kind === "region" && d.data.subtitle) {
+    meta.push(d.data.subtitle);
+  } else if (kind === "process") {
+    meta.push("PID " + d.data.pid);
+    if (d.data.cwd) meta.push("cwd: <code>" + d.data.cwd + "</code>");
+  }
+  if (d.data.severity) meta.push('<span style="color:var(--red)">' + d.data.severity + " severity</span>");
+  if (meta.length) html += '<div class="md-meta">' + meta.map(function(m){ return "<span>" + m + "</span>"; }).join("") + "</div>";
+  el.innerHTML = html;
+}
 
-    // Build cytoscape elements
-    var elements = [];
-    data.nodes.forEach(function(n) {
-      var d = { id: n.id, label: n.label, type: n.type };
-      var fields = ["path", "severity", "has_process", "branch", "dirty", "untracked",
-                    "ahead", "behind", "stale", "size_bytes",
-                    "tokens_est", "age_days", "parent", "attached_to_id", "cwd", "pid"];
-      fields.forEach(function(f) {
-        if (n[f] !== undefined && n[f] !== null) d[f] = n[f];
-      });
-      elements.push({ data: d });
-    });
-    data.edges.forEach(function(e) {
-      var cls = e.style || "";
-      elements.push({ data: { id: e.source + "->" + e.target, source: e.source, target: e.target }, classes: cls });
-    });
+function _statusDotColor(status) {
+  return status === "complete" ? "#3fb950"
+       : status === "iterating" ? "#58a6ff"
+       : status === "planning" ? "#8957e5"
+       : "#7d8590";
+}
 
-    var layout = {
-      name: "fcose",
-      quality: "proof",
-      animate: false,
-      randomize: false,
-      fit: true,
-      padding: 30,
-      nodeSeparation: 80,
-      idealEdgeLength: 80,
-      nodeRepulsion: 8000,
-      gravity: 0.25,
-      tile: true,
-      tilingPaddingVertical: 10,
-      tilingPaddingHorizontal: 10
-    };
+function _zoomTo(node) {
+  var s = _tmState;
+  if (!s) return;
+  s.current = node;
+  _drawTreemap();
+  _renderDetail(null);
+}
 
-    _cy = cytoscape({
-      container: canvas,
-      elements: elements,
-      style: [
-        // base node
-        { selector: "node", style: {
-            "label": "data(label)",
-            "color": "#e6edf3",
-            "background-color": "#21262d",
-            "border-color": "#30363d",
-            "border-width": 1,
-            "font-size": "11px",
-            "font-family": "ui-monospace, monospace",
-            "text-valign": "bottom",
-            "text-margin-y": 6,
-            "width": 24, "height": 24,
-            "shape": "round-rectangle"
-        }},
-        // the small "~" centroid
-        { selector: 'node[type="home"]', style: {
-            "background-color": "#58a6ff",
-            "border-color": "#58a6ff",
-            "width": 30, "height": 30,
-            "font-size": "13px",
-            "font-weight": "bold",
-            "label": "~"
-        }},
-        // compound regions
-        { selector: 'node[type="region"]', style: {
-            "background-color": "rgba(33,38,45,0.5)",
-            "background-opacity": 0.5,
-            "border-color": "#30363d",
-            "border-width": 1,
-            "label": "data(label)",
-            "text-valign": "top",
-            "text-halign": "center",
-            "text-margin-y": -8,
-            "color": "#7d8590",
-            "font-size": "12px",
-            "font-weight": "bold",
-            "shape": "round-rectangle",
-            "padding": "14px",
-            "min-width": 100,
-            "min-height": 80
-        }},
-        { selector: 'node[type="region"][?has_process]', style: {
-            "border-color": "#3fb950",
-            "border-width": 2,
-            "overlay-color": "#3fb950",
-            "overlay-opacity": 0.08
-        }},
-        { selector: 'node[type="region"][severity="HIGH"]', style: {
-            "border-color": "#f85149", "border-width": 2
-        }},
-        { selector: 'node[type="region"][severity="MED"]', style: {
-            "border-color": "#d29922", "border-width": 2
-        }},
-        // config files (now always children of a region)
-        { selector: 'node[type="config"]', style: {
-            "shape": "round-rectangle",
-            "background-color": "#0d1117",
-            "width": 18, "height": 18,
-            "font-size": "10px"
-        }},
-        { selector: 'node[type="config"][severity="HIGH"]', style: {
-            "border-color": "#f85149", "border-width": 2
-        }},
-        { selector: 'node[type="config"][severity="MED"]', style: {
-            "border-color": "#d29922", "border-width": 2
-        }},
-        // process nodes
-        { selector: 'node[type="process"]', style: {
-            "shape": "ellipse",
-            "background-color": "#3fb950",
-            "border-color": "#3fb950",
-            "width": 16, "height": 16
-        }},
-        // edges (mostly only process edges remain)
-        { selector: "edge", style: {
-            "width": 1,
-            "line-color": "#30363d",
-            "target-arrow-color": "#30363d",
-            "target-arrow-shape": "triangle",
-            "curve-style": "bezier"
-        }},
-        { selector: "edge.process", style: {
-            "line-color": "#3fb950",
-            "target-arrow-color": "#3fb950",
-            "line-style": "dotted"
-        }}
-      ],
-      layout: layout
-    });
+function _drawTreemap() {
+  var s = _tmState;
+  var canvas = document.getElementById("map-canvas");
+  var rect = canvas.getBoundingClientRect();
+  var w = rect.width, h = rect.height;
+  s.w = w; s.h = h;
 
-    // Tooltip on hover
-    _cy.on("mouseover", "node", function(evt) {
-      var d = evt.target.data();
-      var lines = [];
-      if (d.type === "home") {
-        lines.push("Home directory");
-      } else if (d.type === "config") {
-        lines.push(d.path || "");
-        var parts = [];
-        if (d.size_bytes !== undefined) parts.push(fmtBytes(d.size_bytes));
-        if (d.tokens_est !== undefined) parts.push("~" + d.tokens_est + " tok");
-        if (d.age_days !== undefined) parts.push(d.age_days + "d old");
-        if (parts.length) lines.push(parts.join(" · "));
-      } else if (d.type === "region") {
-        if (d.id === "region:.claude") {
-          lines.push("Global Claude config — auto-loaded each turn");
-        } else if (d.id === "region:projects") {
-          lines.push("Your project portfolio");
-        } else if (d.path) {
-          var parts = [d.path];
-          if (d.branch) parts.push("branch: " + d.branch);
-          if (d.dirty !== undefined) {
-            var status = [];
-            if (d.dirty) status.push(d.dirty + " dirty");
-            if (d.untracked) status.push(d.untracked + " untracked");
-            if (d.ahead) status.push("↑" + d.ahead);
-            if (d.behind) status.push("↓" + d.behind);
-            parts.push(status.length ? status.join(", ") : "clean");
-          }
-          if (d.stale) parts.push("STALE");
-          lines.push(parts.join(" · "));
-        } else {
-          lines.push(d.label || d.id);
-        }
-      } else if (d.type === "process") {
-        lines.push("PID " + d.pid + " · cwd: " + d.cwd);
-      } else {
-        lines.push(d.label || d.id);
-      }
-      _mapTooltip.innerHTML = lines.map(function(l) {
-        return "<div>" + l + "</div>";
-      }).join("");
+  // Build a sub-hierarchy rooted at current
+  var current = s.current;
+  // d3.treemap operates on a hierarchy; rebuild from current node's data so values re-sum scoped
+  var sub = d3.hierarchy(current.data)
+    .sum(function(d) { return d.children ? 0 : (d.value || 1); })
+    .sort(function(a, b) { return (b.value || 0) - (a.value || 0); });
+
+  d3.treemap()
+    .size([w, h])
+    .paddingTop(function(d) { return d.depth === 0 ? 28 : (d.children ? 22 : 2); })
+    .paddingInner(4)
+    .paddingOuter(4)
+    .round(true)(sub);
+
+  // Build breadcrumb path from root down to current
+  var path = [];
+  var n = current;
+  while (n) { path.unshift(n); n = n.parent; }
+  _renderBreadcrumb(path, _zoomTo);
+
+  // Render
+  var svg = s.svg;
+  svg.selectAll("*").remove();
+
+  // Root title bar
+  svg.append("text")
+    .attr("class", "tm-label tm-region-title")
+    .attr("x", 12).attr("y", 19)
+    .attr("fill", "#7d8590")
+    .text(current.data.name + (current.data.subtitle ? "  ·  " + current.data.subtitle : ""));
+
+  var descendants = sub.descendants().filter(function(d) { return d.depth > 0; });
+
+  var g = svg.selectAll("g.tm-cell")
+    .data(descendants, function(d) { return d.data.path || d.data.name + ":" + d.depth; })
+    .enter().append("g")
+    .attr("class", function(d) { return "tm-cell" + (d.children ? "" : " tm-leaf"); })
+    .attr("transform", function(d) { return "translate(" + d.x0 + "," + d.y0 + ")"; });
+
+  g.append("rect")
+    .attr("class", _decorateClasses)
+    .attr("width", function(d) { return Math.max(0, d.x1 - d.x0); })
+    .attr("height", function(d) { return Math.max(0, d.y1 - d.y0); });
+
+  // Title for branches (regions/repos/groups): top-left, monospace
+  g.filter(function(d) { return d.children; }).each(function(d) {
+    var gw = d.x1 - d.x0, gh = d.y1 - d.y0;
+    if (gw < 50 || gh < 20) return;
+    var sel = d3.select(this);
+    sel.append("text")
+      .attr("class", "tm-label tm-title")
+      .attr("x", 8).attr("y", 14)
+      .text(d.data.name);
+    // subtitle: branch info, percent, etc.
+    var sub = null;
+    if (d.data.kind === "repo" || d.data.kind === "worktree") {
+      var bits = [];
+      if (d.data.branch) bits.push(d.data.branch);
+      if (d.data.dirty) bits.push(d.data.dirty + "Δ");
+      if (d.data.ahead) bits.push("↑" + d.data.ahead);
+      if (d.data.behind) bits.push("↓" + d.data.behind);
+      sub = bits.join(" · ");
+    } else if (d.data.kind === "group" && d.data.percent !== undefined) {
+      sub = d.data.completed_phases + "/" + d.data.total_phases + " · " + d.data.percent + "%";
+    } else if (d.data.subtitle) {
+      sub = d.data.subtitle;
+    }
+    if (sub && gw > 80) {
+      sel.append("text")
+        .attr("class", "tm-label tm-sub")
+        .attr("x", gw - 8).attr("y", 14)
+        .attr("text-anchor", "end")
+        .text(sub);
+    }
+    // running-process pulse dot
+    if (d.data.has_process) {
+      sel.append("circle")
+        .attr("class", "tm-status-dot")
+        .attr("cx", gw - 10).attr("cy", gh - 10)
+        .attr("r", 4)
+        .attr("fill", "#2ea043")
+        .style("filter", "drop-shadow(0 0 4px #2ea043)");
+    }
+  });
+
+  // Leaf labels
+  g.filter(function(d) { return !d.children; }).each(function(d) {
+    var gw = d.x1 - d.x0, gh = d.y1 - d.y0;
+    if (gw < 30 || gh < 14) return;
+    var sel = d3.select(this);
+    // truncate label to fit
+    var label = d.data.name;
+    var maxChars = Math.floor(gw / 7);
+    if (label.length > maxChars) label = label.slice(0, Math.max(0, maxChars - 1)) + "…";
+    sel.append("text")
+      .attr("class", "tm-label tm-leaf-label")
+      .attr("x", 6).attr("y", 14)
+      .text(label);
+    // phase status dot
+    if (d.data.kind === "phase" && gw > 50 && gh > 22) {
+      sel.append("circle")
+        .attr("class", "tm-status-dot")
+        .attr("cx", gw - 8).attr("cy", 10)
+        .attr("r", 3.5)
+        .attr("fill", _statusDotColor(d.data.status));
+    }
+  });
+
+  // Interaction
+  g.on("mouseover", function(event, d) {
+      var t = d.data.name;
+      if (d.data.kind === "file") t += " · " + fmtBytes(d.data.size_bytes || 0) + " · ~" + (d.data.tokens_est || 0) + " tok";
+      else if (d.data.kind === "phase") t += " · " + d.data.status;
+      else if (d.data.path) t += " · " + d.data.path;
+      _mapTooltip.textContent = t;
       _mapTooltip.style.display = "block";
-      var oe = evt.originalEvent;
-      _mapTooltip.style.left = (oe.pageX + 12) + "px";
-      _mapTooltip.style.top  = (oe.pageY + 12) + "px";
-    });
-
-    _cy.on("mousemove", "node", function(evt) {
-      var oe = evt.originalEvent;
-      _mapTooltip.style.left = (oe.pageX + 12) + "px";
-      _mapTooltip.style.top  = (oe.pageY + 12) + "px";
-    });
-
-    _cy.on("mouseout", "node", function() {
-      _mapTooltip.style.display = "none";
-    });
-
-    // Click → zoom into region or navigate to matching tab
-    _cy.on("tap", "node", function(evt) {
-      var d = evt.target.data();
-
-      // zoom into a regular region (not top-level .claude/projects/home)
-      if (d.type === "region" && d.id !== "region:.claude" && d.id !== "region:projects") {
-        _cy.animate({ fit: { eles: evt.target, padding: 30 } }, { duration: 300 });
-        return;
-      }
-
-      // file click → jump to relevant existing tab (preserve v2 behavior)
-      if (d.type === "config") {
+    })
+    .on("mousemove", function(event) {
+      _mapTooltip.style.left = (event.pageX + 12) + "px";
+      _mapTooltip.style.top = (event.pageY + 12) + "px";
+    })
+    .on("mouseout", function() { _mapTooltip.style.display = "none"; })
+    .on("click", function(event, d) {
+      event.stopPropagation();
+      _renderDetail(d);
+      // drill in: only branches with children
+      if (d.children && d.children.length) {
+        // find the equivalent node in the master root by data identity (path or chain)
+        var target = _findInRoot(s.root, d);
+        if (target) _zoomTo(target);
+      } else if (d.data.kind === "file" && d.data.path) {
         activateTab("context");
-        setTimeout(function() { highlightRowByPath(d.path); }, 50);
-      } else if (d.type === "process") {
+      } else if (d.data.kind === "process") {
         activateTab("processes");
       }
-      // (no behavior for home or top-level regions)
     });
 
-    // click empty background → zoom out
-    _cy.on("tap", function(evt) {
-      if (evt.target === _cy) {
-        _cy.animate({ fit: { eles: _cy.elements(), padding: 30 } }, { duration: 300 });
-      }
-    });
+  svg.on("click", function() {
+    // zoom out one level on background click
+    if (s.current.parent) _zoomTo(s.current.parent);
+  });
+}
 
+function _findInRoot(root, target) {
+  // Match by (name + depth chain) since data refs differ between rebuilt hierarchies
+  var chain = [];
+  var n = target;
+  while (n) { chain.unshift(n.data.name); n = n.parent; }
+  var cur = root;
+  // chain[0] is root name; descend matching by name
+  for (var i = 1; i < chain.length; i++) {
+    if (!cur.children) return null;
+    var found = null;
+    for (var j = 0; j < cur.children.length; j++) {
+      if (cur.children[j].data.name === chain[i]) { found = cur.children[j]; break; }
+    }
+    if (!found) return null;
+    cur = found;
+  }
+  return cur;
+}
+
+function loadMap() {
+  if (typeof d3 === "undefined") { setTimeout(loadMap, 100); return; }
+  fetch("/api/treemap").then(function(r) { return r.json(); }).then(function(data) {
+    var canvas = document.getElementById("map-canvas");
+    if (!canvas) return;
+    canvas.innerHTML = "";
+
+    var root = d3.hierarchy(data)
+      .sum(function(d) { return d.children ? 0 : (d.value || 1); })
+      .sort(function(a, b) { return (b.value || 0) - (a.value || 0); });
+
+    var svg = d3.select(canvas).append("svg")
+      .attr("preserveAspectRatio", "xMidYMid meet");
+
+    _tmState = { root: root, current: root, svg: svg };
+    _drawTreemap();
+    _renderDetail(null);
+
+    // Re-render on window resize
+    var _resizeTO;
+    window.addEventListener("resize", function() {
+      clearTimeout(_resizeTO);
+      _resizeTO = setTimeout(function() {
+        if (_tmState) _drawTreemap();
+      }, 150);
+    });
   }).catch(function(err) {
     var canvas = document.getElementById("map-canvas");
     if (canvas) canvas.textContent = "Error loading map: " + err.message;
