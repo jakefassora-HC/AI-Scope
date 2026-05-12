@@ -115,3 +115,23 @@ code { background: var(--panel); padding: 2px 6px; border-radius: 4px;
   font-size: 12.5px;
   white-space: pre;
 }
+
+/* System Map */
+.map-toolbar { display: flex; justify-content: space-between; align-items: center;
+               margin-bottom: 12px; }
+.map-legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted);
+              align-items: center; }
+.map-legend i.dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  margin-right: 6px; vertical-align: middle;
+}
+.map-legend .dot-high { background: var(--red); }
+.map-legend .dot-med  { background: var(--amber); }
+.map-legend .dot-proc { background: var(--green); }
+.map-canvas {
+  height: 640px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  position: relative;
+}

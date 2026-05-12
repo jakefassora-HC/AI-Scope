@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <title>scope</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script defer src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
 </head>
 <body>
   <header>
@@ -66,6 +69,7 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
     <button class="tab" data-tab="browser">File Browser</button>
     <button class="tab" data-tab="processes">Processes</button>
     <button class="tab" data-tab="git">Git State</button>
+    <button class="tab" data-tab="map">Map</button>
   </nav>
 
   <section id="tab-context" class="tab-panel active">
@@ -93,6 +97,18 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
     <div id="git-projects">Loading…</div>
     <h2>Active Worktrees (<code>~/.claude/worktrees/</code>)</h2>
     <div id="git-worktrees">Loading…</div>
+  </section>
+
+  <section id="tab-map" class="tab-panel">
+    <div class="map-toolbar">
+      <h2 style="margin:0">System Map</h2>
+      <div class="map-legend">
+        <span><i class="dot dot-high"></i> HIGH</span>
+        <span><i class="dot dot-med"></i> MED</span>
+        <span><i class="dot dot-proc"></i> claude running</span>
+      </div>
+    </div>
+    <div id="map-canvas" class="map-canvas">Loading…</div>
   </section>
 
   <script>window.HOME_PATH = "{{ home_path }}";</script>
