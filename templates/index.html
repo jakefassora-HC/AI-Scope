@@ -16,6 +16,51 @@
     <div id="insights-body">Loading…</div>
   </section>
 
+  <section id="cheatsheet" class="panel">
+    <div class="cheatsheet-head">
+      <h2>Start a new Claude Code project</h2>
+      <button id="cheatsheet-toggle" type="button" aria-expanded="true">Hide</button>
+    </div>
+    <div id="cheatsheet-body">
+      <ol class="steps">
+        <li>
+          <h3>Create the folder and init git</h3>
+          <pre><code>mkdir -p ~/projects/my-new-project
+cd ~/projects/my-new-project
+git init -b main</code></pre>
+        </li>
+        <li>
+          <h3>Open Claude Code in the folder</h3>
+          <pre><code>claude</code></pre>
+          <p class="muted">Then either seed it yourself or have Claude scaffold the whole thing.</p>
+        </li>
+        <li>
+          <h3>Seed a small CLAUDE.md (keep it under 8&nbsp;KB)</h3>
+          <p class="muted">Paste this prompt:</p>
+          <pre><code>Create a CLAUDE.md for this project. Cover: goal, stack, file layout,
+coding style, and any "never do" rules. Keep it under 200 lines.</code></pre>
+        </li>
+        <li>
+          <h3>Or: have Claude do the whole scaffold in one shot</h3>
+          <p class="muted">Paste this prompt (no terminal commands needed — Claude runs them):</p>
+          <pre><code>Scaffold a new project at ~/projects/my-new-project. Stack: [Python / Node / Go / etc].
+Goal: [one sentence]. Init git on branch main, write a short CLAUDE.md and README.md,
+make the first commit "chore: scaffold". Stop and show me the tree before doing anything else.</code></pre>
+        </li>
+        <li>
+          <h3>Make it visible to scope</h3>
+          <ul class="muted">
+            <li>Folder must live under <code>~/projects/</code> to appear in the Git State tab.</li>
+            <li>Keep <code>CLAUDE.md</code> small — large auto-load files trigger an Insights warning.</li>
+            <li>Add a GitHub remote and push so the Git State tab can show <code>↑ahead</code> / <code>↓behind</code>:
+              <pre><code>gh repo create my-new-project --private --source=. --remote=origin --push</code></pre>
+            </li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+  </section>
+
   <nav class="tabs">
     <button class="tab active" data-tab="context">Claude Context</button>
     <button class="tab" data-tab="browser">File Browser</button>
