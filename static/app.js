@@ -1,5 +1,86 @@
 "use strict";
 
+function fmtBytes(bytes) {
+  if (bytes === 0) return "0 B";
+  var k = 1024;
+  var sizes = ["B", "KB", "MB", "GB"];
+  var i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round(bytes / Math.pow(k, i) * 10) / 10 + " " + sizes[i];
+}
+
+var browserPath = null;
+
+function fmtUptime(sec) {
+  if (sec < 60) return sec + "s";
+  if (sec < 3600) return Math.floor(sec / 60) + "m";
+  if (sec < 86400) return Math.floor(sec / 3600) + "h";
+  return Math.floor(sec / 86400) + "d";
+}
+
+function loadBrowse(path) {
+  fetch("/api/browse?path=" + encodeURIComponent(path)).then(function(r) {
+    if (r.status === 403) return r.json().then(function(d) { throw new Error(d.error); });
+    return r.json();
+  }).then(function(d) {
+    browserPath = d.path;
+    document.getElementById("browser-current").textContent = d.path;
+    var ul = document.createElement("div");
+    var parent = d.path.replace(/\/[^/]+$/, "");
+    if (parent && parent !== d.path) {
+      var up = document.createElement("div");
+      up.className = "file-row"; up.style.cursor = "pointer";
+      up.innerHTML = "<span>📁 ../ (up)</span><span></span><span></span><span></span>";
+      up.addEventListener("click", function() { loadBrowse(parent); });
+      ul.appendChild(up);
+    }
+    d.items.forEach(function(it) {
+      var row = document.createElement("div");
+      row.className = "file-row";
+      if (it.is_dir) {
+        row.style.cursor = "pointer";
+        row.addEventListener("click", function() { loadBrowse(it.path); });
+      }
+      row.innerHTML =
+        "<span>" + (it.is_dir ? "📁 " : "📄 ") + it.name + "</span>" +
+        "<span></span>" +
+        "<span>" + (it.is_dir ? "" : fmtBytes(it.size_bytes)) + "</span>" +
+        "<span>" + it.modified_iso.slice(0, 10) + "</span>";
+      ul.appendChild(row);
+    });
+    var container = document.getElementById("browser-list");
+    container.innerHTML = ""; container.appendChild(ul);
+  }).catch(function(err) {
+    document.getElementById("browser-list").textContent = "Error: " + err.message;
+  });
+}
+
+function loadProcesses() {
+  fetch("/api/processes").then(function(r) { return r.json(); }).then(function(d) {
+    var container = document.getElementById("processes-list");
+    if (!d.processes.length) {
+      container.innerHTML = "<p style='color:var(--muted)'>No claude processes running.</p>";
+      return;
+    }
+    container.innerHTML = "";
+    d.processes.forEach(function(p) {
+      var row = document.createElement("div");
+      row.className = "file-row";
+      row.innerHTML =
+        "<span>PID " + p.pid + "</span>" +
+        "<span>" + p.cwd + "</span>" +
+        "<span></span>" +
+        "<span>up " + fmtUptime(p.uptime_sec) + "</span>";
+      container.appendChild(row);
+    });
+  });
+}
+
+// Lazy-load tabs the first time they are opened
+document.querySelector("[data-tab='browser']").addEventListener("click", function() {
+  if (browserPath === null) loadBrowse(window.HOME_PATH || "/Users/jakefassora");
+});
+document.querySelector("[data-tab='processes']").addEventListener("click", loadProcesses);
+
 // Tab switching
 document.querySelectorAll(".tab").forEach(function(btn) {
   btn.addEventListener("click", function() {

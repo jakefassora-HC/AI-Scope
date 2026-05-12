@@ -32,10 +32,20 @@
     <div id="project-md">Loading…</div>
   </section>
 
-  <section id="tab-browser" class="tab-panel"><p>File browser (Phase 3).</p></section>
-  <section id="tab-processes" class="tab-panel"><p>Processes (Phase 3).</p></section>
+  <section id="tab-browser" class="tab-panel">
+    <h2>File Browser</h2>
+    <div id="browser-path" class="panel">Path: <code id="browser-current">~</code></div>
+    <div id="browser-list">Loading…</div>
+  </section>
+
+  <section id="tab-processes" class="tab-panel">
+    <h2>Active Claude Processes</h2>
+    <div id="processes-list">Loading…</div>
+  </section>
+
   <section id="tab-git" class="tab-panel"><p>Git state (Phase 4).</p></section>
 
+  <script>window.HOME_PATH = "{{ home_path }}";</script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
