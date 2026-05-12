@@ -6,7 +6,7 @@ into a node-link diagram suitable for Cytoscape.js visualization.
 No filesystem access, no Flask. Pure aggregation over dicts.
 """
 from __future__ import annotations
-from typing import Optional
+from typing import Callable, Optional
 
 
 def _severity_map(findings: list[dict]) -> dict[str, str]:
@@ -37,27 +37,23 @@ def _severity_map(findings: list[dict]) -> dict[str, str]:
     return path_to_severity
 
 
-def _find_parent_repo(worktree_path: str, repos: list[dict]) -> Optional[str]:
-    """Find a parent repo by longest-prefix matching.
+def _find_parent_repo_path(path: str, repos: list[dict]) -> Optional[str]:
+    """Find the parent repo path by longest-prefix matching.
 
-    Returns the repo node id if found, else None.
+    Returns the repo path string if found, else None.
     """
     best_match = None
     best_len = 0
     for repo in repos:
         repo_path = repo.get("path", "")
-        # Check if repo_path is a prefix of worktree_path
-        if worktree_path.startswith(repo_path + "/"):
+        if path.startswith(repo_path + "/"):
             if len(repo_path) > best_len:
-                best_match = repo
+                best_match = repo_path
                 best_len = len(repo_path)
-
-    if best_match:
-        return f"repo:{best_match['path']}"
-    return None
+    return best_match
 
 
-def _config_node(file: dict, severity: Optional[str]) -> dict:
+def _config_node(file: dict, severity: Optional[str], parent: Optional[str]) -> dict:
     """Build a config node from a file dict."""
     return {
         "id": f"config:{file['path']}",
@@ -68,42 +64,34 @@ def _config_node(file: dict, severity: Optional[str]) -> dict:
         "tokens_est": file.get("tokens_est", 0),
         "age_days": file.get("age_days", 0),
         "severity": severity,
+        "parent": parent,
     }
 
 
-def _repo_node(repo: dict, severity: Optional[str]) -> dict:
-    """Build a repo node from a repo dict."""
-    path = repo["path"]
-    label = path.split("/")[-1]  # basename
-    return {
-        "id": f"repo:{path}",
+def _region_node(
+    path: str,
+    label: str,
+    parent: Optional[str],
+    severity: Optional[str] = None,
+    repo: Optional[dict] = None,
+) -> dict:
+    """Build a region node."""
+    node: dict = {
+        "id": f"region:{path}",
         "label": label,
-        "type": "repo",
+        "type": "region",
         "path": path,
-        "branch": repo.get("branch", ""),
-        "dirty": repo.get("dirty", 0),
-        "ahead": repo.get("ahead", 0),
-        "behind": repo.get("behind", 0),
-        "stale": repo.get("stale", False),
+        "parent": parent,
         "severity": severity,
-        "has_process": False,  # Updated later if a process matches
+        "has_process": False,
     }
-
-
-def _worktree_node(worktree: dict, parent_repo_id: Optional[str], severity: Optional[str]) -> dict:
-    """Build a worktree node from a worktree dict."""
-    path = worktree["path"]
-    label = path.split("/")[-1]  # basename
-    return {
-        "id": f"worktree:{path}",
-        "label": label,
-        "type": "worktree",
-        "path": path,
-        "parent_repo_id": parent_repo_id,
-        "branch": worktree.get("branch", ""),
-        "dirty": worktree.get("dirty", 0),
-        "severity": severity,
-    }
+    if repo is not None:
+        node["branch"] = repo.get("branch", "")
+        node["dirty"] = repo.get("dirty", 0)
+        node["ahead"] = repo.get("ahead", 0)
+        node["behind"] = repo.get("behind", 0)
+        node["stale"] = repo.get("stale", False)
+    return node
 
 
 def _process_node(process: dict, attached_to_id: Optional[str]) -> dict:
@@ -128,6 +116,7 @@ def build_graph(
     processes: list[dict],
     findings: list[dict],
     home_path: str,
+    list_landmarks: Optional[Callable[[str], list[dict]]] = None,
 ) -> dict:
     """Build a node-link graph from scanner outputs.
 
@@ -139,14 +128,20 @@ def build_graph(
         processes: List of process dicts from find_claude_processes
         findings: List of finding dicts with target and severity
         home_path: User's home directory path (e.g., "/Users/x")
+        list_landmarks: Optional callable(repo_path) -> list[file_dict].
+            Called per repo to surface landmark files as config nodes.
+            Defaults to a no-op if None.
 
     Returns:
         Dict with "nodes" (list) and "edges" (list) keys.
     """
+    if list_landmarks is None:
+        list_landmarks = lambda _: []
+
     nodes: list[dict] = []
     edges: list[dict] = []
 
-    # Start with the home node
+    # Home node (identity/label — no edges emitted from it)
     nodes.append({
         "id": "home",
         "label": "~",
@@ -156,103 +151,92 @@ def build_graph(
     # Build severity map
     severity_map = _severity_map(findings)
 
-    # Track config files to avoid double-adding and to find which belong to repos
-    config_by_path: dict[str, dict] = {}
+    # --- Top-level region nodes ---
+    nodes.append(_region_node(".claude", ".claude", parent=None))
+    nodes.append(_region_node("projects", "projects", parent=None))
 
-    # Add config nodes (both claude_files and project_md)
-    all_configs = claude_files + project_md
-    for config in all_configs:
-        config_path = config["path"]
-        severity = severity_map.get(config_path)
-        node = _config_node(config, severity)
-        nodes.append(node)
-        config_by_path[config_path] = config
+    # --- Rules sub-region inside .claude ---
+    rules_region_id = "region:.claude/rules"
+    rules_region_emitted = False
+    rules_prefix = f"{home_path}/.claude/rules/"
 
-    # Add repo nodes and track by path for later reference
-    repo_by_path: dict[str, dict] = {}
+    def _ensure_rules_region() -> None:
+        nonlocal rules_region_emitted
+        if not rules_region_emitted:
+            nodes.append(_region_node(".claude/rules", "rules", parent="region:.claude"))
+            rules_region_emitted = True
+
+    # --- claude_files → config nodes under region:.claude ---
+    claude_file_paths: set[str] = set()
+    for f in claude_files:
+        fpath = f["path"]
+        claude_file_paths.add(fpath)
+        severity = severity_map.get(fpath)
+        if fpath.startswith(rules_prefix):
+            _ensure_rules_region()
+            parent = rules_region_id
+        else:
+            parent = "region:.claude"
+        nodes.append(_config_node(f, severity, parent=parent))
+
+    # --- Repo regions ---
+    repo_region_by_path: dict[str, dict] = {}  # path → region node
     for repo in repos:
         repo_path = repo["path"]
         severity = severity_map.get(repo_path)
-        node = _repo_node(repo, severity)
+        label = repo_path.split("/")[-1]
+        node = _region_node(repo_path, label, parent="region:projects", severity=severity, repo=repo)
         nodes.append(node)
-        repo_by_path[repo_path] = node
+        repo_region_by_path[repo_path] = node
 
-    # Add worktree nodes
+        # Landmark files for this repo
+        landmark_paths: set[str] = set()
+        for lm in list_landmarks(repo_path):
+            lm_path = lm["path"]
+            landmark_paths.add(lm_path)
+            lm_severity = severity_map.get(lm_path)
+            nodes.append(_config_node(lm, lm_severity, parent=f"region:{repo_path}"))
+
+        # project_md files that belong to this repo (de-dup with landmarks)
+        for pm in project_md:
+            pm_path = pm["path"]
+            if pm_path.startswith(repo_path + "/") and pm_path not in landmark_paths and pm_path not in claude_file_paths:
+                pm_severity = severity_map.get(pm_path)
+                nodes.append(_config_node(pm, pm_severity, parent=f"region:{repo_path}"))
+                landmark_paths.add(pm_path)  # prevent double-add if repos overlap
+
+    # project_md files not matched to any repo → under region:projects
+    all_repo_paths = list(repo_region_by_path.keys())
+    emitted_pm_paths: set[str] = {
+        n["path"] for n in nodes if n.get("type") == "config" and n.get("path")
+    }
+    for pm in project_md:
+        pm_path = pm["path"]
+        if pm_path in emitted_pm_paths or pm_path in claude_file_paths:
+            continue
+        pm_severity = severity_map.get(pm_path)
+        nodes.append(_config_node(pm, pm_severity, parent="region:projects"))
+
+    # --- Worktree regions ---
     for worktree in worktrees:
-        worktree_path = worktree["path"]
-        severity = severity_map.get(worktree_path)
-        parent_repo_id = _find_parent_repo(worktree_path, repos)
-        node = _worktree_node(worktree, parent_repo_id, severity)
-        nodes.append(node)
+        wt_path = worktree["path"]
+        severity = severity_map.get(wt_path)
+        label = wt_path.split("/")[-1]
+        parent_repo_path = _find_parent_repo_path(wt_path, repos)
+        parent = f"region:{parent_repo_path}" if parent_repo_path else "region:projects"
+        nodes.append(_region_node(wt_path, label, parent=parent, severity=severity, repo=worktree))
 
-    # Add process nodes
+    # --- Process nodes ---
     process_by_pid: dict[int, dict] = {}
     for process in processes:
         pid = process["pid"]
         cwd = process.get("cwd", "")
-
-        # Find if cwd matches any repo exactly
-        attached_to_id = None
-        if cwd in repo_by_path:
-            attached_to_id = f"repo:{cwd}"
-
+        attached_to_id = f"region:{cwd}" if cwd in repo_region_by_path else None
         node = _process_node(process, attached_to_id)
         nodes.append(node)
         process_by_pid[pid] = node
 
-    # Build edges
-    # --- Config node edges ---
-    for config_path, config in config_by_path.items():
-        config_id = f"config:{config_path}"
-
-        # Check if this config lives inside a repo
-        parent_repo_id = None
-        for repo_path in repo_by_path.keys():
-            # Is config_path inside repo_path?
-            if config_path.startswith(repo_path + "/"):
-                # Keep longest match
-                if parent_repo_id is None or len(repo_path) > len(parent_repo_id.replace("repo:", "")):
-                    parent_repo_id = f"repo:{repo_path}"
-
-        if parent_repo_id:
-            edges.append({
-                "source": parent_repo_id,
-                "target": config_id,
-            })
-        else:
-            edges.append({
-                "source": "home",
-                "target": config_id,
-            })
-
-    # --- Repo node edges (all attach to home for now; may change if repo itself is nested) ---
-    for repo_path in repo_by_path.keys():
-        repo_id = f"repo:{repo_path}"
-        edges.append({
-            "source": "home",
-            "target": repo_id,
-        })
-
-    # --- Worktree node edges ---
-    for worktree in worktrees:
-        worktree_id = f"worktree:{worktree['path']}"
-        worktree_node = [n for n in nodes if n["id"] == worktree_id][0]
-        parent_repo_id = worktree_node["parent_repo_id"]
-
-        if parent_repo_id:
-            edges.append({
-                "source": parent_repo_id,
-                "target": worktree_id,
-                "style": "dashed",
-            })
-        else:
-            edges.append({
-                "source": "home",
-                "target": worktree_id,
-                "style": "dashed",
-            })
-
-    # --- Process node edges & update repo has_process ---
+    # --- Edges: only process edges remain ---
     for process in processes:
         pid = process["pid"]
         process_id = f"process:{pid}"
@@ -260,7 +244,7 @@ def build_graph(
         attached_to_id = process_node["attached_to_id"]
 
         if attached_to_id:
-            # Update the repo node's has_process flag
+            # Mark the region as having a process
             for node in nodes:
                 if node["id"] == attached_to_id:
                     node["has_process"] = True
@@ -269,12 +253,7 @@ def build_graph(
                 "target": process_id,
                 "style": "process",
             })
-        else:
-            edges.append({
-                "source": "home",
-                "target": process_id,
-                "style": "process",
-            })
+        # Unattached processes get no edge (they're top-level orphans)
 
     return {
         "nodes": nodes,

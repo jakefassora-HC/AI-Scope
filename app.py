@@ -13,6 +13,32 @@ app = Flask(__name__, static_folder="static", template_folder="templates")
 HOME = Path.home()
 
 
+def _list_landmarks(repo_path: str) -> list[dict]:
+    from os import scandir
+    from datetime import datetime, timezone
+    from scope.token_estimator import estimate_tokens_from_bytes
+    names = {"CLAUDE.md", "README.md", "package.json", "pyproject.toml",
+             "Cargo.toml", "go.mod", "requirements.txt"}
+    out: list[dict] = []
+    try:
+        for entry in scandir(repo_path):
+            if entry.name not in names or not entry.is_file(follow_symlinks=False):
+                continue
+            stat = entry.stat(follow_symlinks=False)
+            mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+            out.append({
+                "path": entry.path, "name": entry.name,
+                "size_bytes": stat.st_size,
+                "tokens_est": estimate_tokens_from_bytes(stat.st_size),
+                "modified_iso": mtime.isoformat(timespec="seconds"),
+                "age_days": (datetime.now(tz=timezone.utc) - mtime).days,
+                "auto_loaded": entry.name == "CLAUDE.md",
+            })
+    except (OSError, PermissionError):
+        pass
+    return out
+
+
 @app.get("/health")
 def health():
     return jsonify({"status": "ok", "name": "scope", "version": "0.1.0"})
@@ -87,6 +113,7 @@ def api_graph():
         processes=processes,
         findings=findings,
         home_path=str(HOME),
+        list_landmarks=_list_landmarks,
     ))
 
 

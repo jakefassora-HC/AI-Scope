@@ -26,6 +26,6 @@ def test_api_graph_node_types_are_valid():
     client = app.test_client()
     resp = client.get("/api/graph")
     data = resp.get_json()
-    valid_types = {"home", "config", "repo", "worktree", "process"}
+    valid_types = {"home", "region", "config", "process"}
     for n in data["nodes"]:
         assert n.get("type") in valid_types, f"unexpected type: {n}"

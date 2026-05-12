@@ -265,18 +265,18 @@ function loadMap() {
     setTimeout(loadMap, 100);
     return;
   }
-  // Register dagre layout extension (idempotent guard)
-  if (window.cytoscapeDagre && !window._dagreRegistered) {
-    cytoscape.use(window.cytoscapeDagre);
-    window._dagreRegistered = true;
+  // Register fcose layout extension (idempotent guard)
+  if (window.cytoscapeFcose && !window._fcoseRegistered) {
+    cytoscape.use(window.cytoscapeFcose);
+    window._fcoseRegistered = true;
   }
 
   fetch("/api/graph").then(function(r) { return r.json(); }).then(function(data) {
     var canvas = document.getElementById("map-canvas");
     if (!canvas) return;
 
-    // Empty state
-    if (!data.nodes || data.nodes.length <= 1) {
+    // Empty state (baseline is 3 nodes: home + region:.claude + region:projects)
+    if (!data.nodes || data.nodes.length <= 3) {
       canvas.innerHTML =
         "<p style='text-align:center;padding:40px;color:var(--muted)'>" +
         "Map is empty. Create a project under <code>~/projects/</code> " +
@@ -290,8 +290,9 @@ function loadMap() {
     var elements = [];
     data.nodes.forEach(function(n) {
       var d = { id: n.id, label: n.label, type: n.type };
-      var fields = ["path", "severity", "has_process", "branch", "dirty", "size_bytes",
-                    "tokens_est", "age_days", "parent_repo_id", "attached_to_id", "cwd", "pid"];
+      var fields = ["path", "severity", "has_process", "branch", "dirty", "untracked",
+                    "ahead", "behind", "stale", "size_bytes",
+                    "tokens_est", "age_days", "parent", "attached_to_id", "cwd", "pid"];
       fields.forEach(function(f) {
         if (n[f] !== undefined && n[f] !== null) d[f] = n[f];
       });
@@ -302,20 +303,27 @@ function loadMap() {
       elements.push({ data: { id: e.source + "->" + e.target, source: e.source, target: e.target }, classes: cls });
     });
 
-    // Determine layout — prefer dagre, fall back to breadthfirst
-    var layout;
-    try {
-      // Test if dagre layout is registered
-      var testLayout = { name: "dagre" };
-      layout = { name: "dagre", rankDir: "TB", nodeSep: 50, rankSep: 70, padding: 20 };
-    } catch(e) {
-      layout = { name: "breadthfirst", directed: true, roots: ["home"], padding: 20 };
-    }
+    var layout = {
+      name: "fcose",
+      quality: "proof",
+      animate: false,
+      randomize: false,
+      fit: true,
+      padding: 30,
+      nodeSeparation: 80,
+      idealEdgeLength: 80,
+      nodeRepulsion: 8000,
+      gravity: 0.25,
+      tile: true,
+      tilingPaddingVertical: 10,
+      tilingPaddingHorizontal: 10
+    };
 
     _cy = cytoscape({
       container: canvas,
       elements: elements,
       style: [
+        // base node
         { selector: "node", style: {
             "label": "data(label)",
             "color": "#e6edf3",
@@ -326,47 +334,69 @@ function loadMap() {
             "font-family": "ui-monospace, monospace",
             "text-valign": "bottom",
             "text-margin-y": 6,
-            "width": 28, "height": 28,
+            "width": 24, "height": 24,
             "shape": "round-rectangle"
         }},
+        // the small "~" centroid
         { selector: 'node[type="home"]', style: {
             "background-color": "#58a6ff",
             "border-color": "#58a6ff",
-            "width": 36, "height": 36,
+            "width": 30, "height": 30,
             "font-size": "13px",
-            "font-weight": "bold"
+            "font-weight": "bold",
+            "label": "~"
         }},
+        // compound regions
+        { selector: 'node[type="region"]', style: {
+            "background-color": "rgba(33,38,45,0.5)",
+            "background-opacity": 0.5,
+            "border-color": "#30363d",
+            "border-width": 1,
+            "label": "data(label)",
+            "text-valign": "top",
+            "text-halign": "center",
+            "text-margin-y": -8,
+            "color": "#7d8590",
+            "font-size": "12px",
+            "font-weight": "bold",
+            "shape": "round-rectangle",
+            "padding": "14px",
+            "min-width": 100,
+            "min-height": 80
+        }},
+        { selector: 'node[type="region"][?has_process]', style: {
+            "border-color": "#3fb950",
+            "border-width": 2,
+            "overlay-color": "#3fb950",
+            "overlay-opacity": 0.08
+        }},
+        { selector: 'node[type="region"][severity="HIGH"]', style: {
+            "border-color": "#f85149", "border-width": 2
+        }},
+        { selector: 'node[type="region"][severity="MED"]', style: {
+            "border-color": "#d29922", "border-width": 2
+        }},
+        // config files (now always children of a region)
         { selector: 'node[type="config"]', style: {
             "shape": "round-rectangle",
-            "background-color": "#161b22"
+            "background-color": "#0d1117",
+            "width": 18, "height": 18,
+            "font-size": "10px"
         }},
-        { selector: 'node[type="repo"]', style: {
-            "shape": "round-rectangle",
-            "background-color": "#1f6feb33"
+        { selector: 'node[type="config"][severity="HIGH"]', style: {
+            "border-color": "#f85149", "border-width": 2
         }},
-        { selector: 'node[type="worktree"]', style: {
-            "shape": "round-rectangle",
-            "background-color": "#21262d",
-            "border-style": "dashed"
+        { selector: 'node[type="config"][severity="MED"]', style: {
+            "border-color": "#d29922", "border-width": 2
         }},
+        // process nodes
         { selector: 'node[type="process"]', style: {
             "shape": "ellipse",
             "background-color": "#3fb950",
-            "border-color": "#3fb950"
+            "border-color": "#3fb950",
+            "width": 16, "height": 16
         }},
-        { selector: 'node[severity="HIGH"]', style: {
-            "border-color": "#f85149",
-            "border-width": 3
-        }},
-        { selector: 'node[severity="MED"]', style: {
-            "border-color": "#d29922",
-            "border-width": 3
-        }},
-        { selector: "node[?has_process]", style: {
-            "overlay-color": "#3fb950",
-            "overlay-padding": 4,
-            "overlay-opacity": 0.2
-        }},
+        // edges (mostly only process edges remain)
         { selector: "edge", style: {
             "width": 1,
             "line-color": "#30363d",
@@ -374,7 +404,6 @@ function loadMap() {
             "target-arrow-shape": "triangle",
             "curve-style": "bezier"
         }},
-        { selector: "edge.dashed", style: { "line-style": "dashed" }},
         { selector: "edge.process", style: {
             "line-color": "#3fb950",
             "target-arrow-color": "#3fb950",
@@ -383,10 +412,6 @@ function loadMap() {
       ],
       layout: layout
     });
-
-    // If dagre layout failed silently (layout ran but looks bad), there's not much
-    // we can do at runtime — dagre extension self-registers on load so if cytoscape
-    // is defined and dagre CDN loaded, it should just work.
 
     // Tooltip on hover
     _cy.on("mouseover", "node", function(evt) {
@@ -401,15 +426,27 @@ function loadMap() {
         if (d.tokens_est !== undefined) parts.push("~" + d.tokens_est + " tok");
         if (d.age_days !== undefined) parts.push(d.age_days + "d old");
         if (parts.length) lines.push(parts.join(" · "));
-      } else if (d.type === "repo") {
-        lines.push(d.path || "");
-        var summary = [];
-        if (d.branch) summary.push(d.branch);
-        if (d.dirty) summary.push(d.dirty + " dirty");
-        if (!d.dirty) summary.push("clean");
-        lines.push(summary.join(", "));
-      } else if (d.type === "worktree") {
-        lines.push((d.path || "") + " (" + (d.branch || "") + ") (worktree)");
+      } else if (d.type === "region") {
+        if (d.id === "region:.claude") {
+          lines.push("Global Claude config — auto-loaded each turn");
+        } else if (d.id === "region:projects") {
+          lines.push("Your project portfolio");
+        } else if (d.path) {
+          var parts = [d.path];
+          if (d.branch) parts.push("branch: " + d.branch);
+          if (d.dirty !== undefined) {
+            var status = [];
+            if (d.dirty) status.push(d.dirty + " dirty");
+            if (d.untracked) status.push(d.untracked + " untracked");
+            if (d.ahead) status.push("↑" + d.ahead);
+            if (d.behind) status.push("↓" + d.behind);
+            parts.push(status.length ? status.join(", ") : "clean");
+          }
+          if (d.stale) parts.push("STALE");
+          lines.push(parts.join(" · "));
+        } else {
+          lines.push(d.label || d.id);
+        }
       } else if (d.type === "process") {
         lines.push("PID " + d.pid + " · cwd: " + d.cwd);
       } else {
@@ -434,17 +471,30 @@ function loadMap() {
       _mapTooltip.style.display = "none";
     });
 
-    // Click → navigate to matching tab
+    // Click → zoom into region or navigate to matching tab
     _cy.on("tap", "node", function(evt) {
       var d = evt.target.data();
-      if (d.type === "repo" || d.type === "worktree") {
-        activateTab("git");
-        setTimeout(function() { highlightRowByPath(d.path); }, 50);
-      } else if (d.type === "config") {
+
+      // zoom into a regular region (not top-level .claude/projects/home)
+      if (d.type === "region" && d.id !== "region:.claude" && d.id !== "region:projects") {
+        _cy.animate({ fit: { eles: evt.target, padding: 30 } }, { duration: 300 });
+        return;
+      }
+
+      // file click → jump to relevant existing tab (preserve v2 behavior)
+      if (d.type === "config") {
         activateTab("context");
         setTimeout(function() { highlightRowByPath(d.path); }, 50);
       } else if (d.type === "process") {
         activateTab("processes");
+      }
+      // (no behavior for home or top-level regions)
+    });
+
+    // click empty background → zoom out
+    _cy.on("tap", function(evt) {
+      if (evt.target === _cy) {
+        _cy.animate({ fit: { eles: _cy.elements(), padding: 30 } }, { duration: 300 });
       }
     });
 
