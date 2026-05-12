@@ -104,17 +104,21 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
         <button class="map-view-btn active" data-view="circles">◉ Circles</button>
         <button class="map-view-btn" data-view="sunburst">◐ Sunburst</button>
       </div>
+      <input id="map-search" type="search" class="map-search" placeholder="search plans…" autocomplete="off">
+      <span id="map-refresh-indicator" class="map-refresh-indicator" title="last refresh — auto-refreshes every 10s"></span>
       <div class="map-legend">
         <span><i class="dot dot-complete"></i> complete</span>
         <span><i class="dot dot-iterating"></i> iterating</span>
         <span><i class="dot dot-planning"></i> planning</span>
         <span><i class="dot dot-dirty"></i> dirty</span>
         <span><i class="dot dot-proc"></i> claude running</span>
+        <span><i class="dot dot-open"></i> claude editing</span>
         <span><i class="dot dot-high"></i> HIGH</span>
       </div>
     </div>
     <div id="map-canvas" class="map-canvas">Click Map tab to load…</div>
-    <p class="map-hint">Click a circle/arc to zoom in · click background or center to zoom out · click any plan file to read it</p>
+    <div id="map-search-results" class="map-search-results" hidden></div>
+    <p class="map-hint">Click a circle/arc to zoom in · click background or center to zoom out · click any plan file to read it · search box filters all plan files · view auto-refreshes every 10s</p>
   </section>
 
   <!-- Plan viewer modal -->

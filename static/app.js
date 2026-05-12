@@ -300,6 +300,7 @@ function renderCircles(data) {
   node.append("circle")
     .attr("fill", function(d){
       var k = d.data.kind;
+      if (k === "plan" && d.data.claude_active) return "#ffa657";
       if (k === "phase") return STATUS_COLOR[d.data.status] || "#7d8590";
       if (k === "plan") {
         var s = d.data.phase_status; if (s) return STATUS_COLOR[s] || "#7d8590";
@@ -310,6 +311,9 @@ function renderCircles(data) {
       if (d.data.dirty) return "#d29922";
       return KIND_COLOR[k] || "#21262d";
     })
+    .attr("stroke", function(d){ return d.data.claude_active ? "#ffa657" : null; })
+    .attr("stroke-width", function(d){ return d.data.claude_active ? 2 : 0; })
+    .style("filter", function(d){ return d.data.claude_active ? "drop-shadow(0 0 6px #ffa657)" : null; })
     .attr("fill-opacity", function(d){ return d.children ? 0.35 : 0.85; })
     .on("click", function(event, d){
       event.stopPropagation();
@@ -320,6 +324,7 @@ function renderCircles(data) {
     })
     .on("mouseover", function(e, d){
       var parts = ["<b>" + d.data.name + "</b> · " + (d.data.kind || "")];
+      if (d.data.claude_active) parts.push("<span style='color:#ffa657'>● claude editing</span>");
       if (d.data.status) parts.push(d.data.status);
       if (d.data.phase_status) parts.push(d.data.phase_status);
       if (d.data.branch) parts.push("branch: " + d.data.branch);
@@ -442,6 +447,7 @@ function renderSunburst(data) {
     .style("pointer-events", "none").text("scope");
 
   function arcColor(d) {
+    if (d.data.kind === "plan" && d.data.claude_active) return "#ffa657";
     if (d.data.kind === "phase") return STATUS_COLOR[d.data.status] || "#7d8590";
     if (d.data.kind === "plan") return STATUS_COLOR[d.data.phase_status || "draft"];
     if (d.data.has_process) return "#2ea043";
@@ -504,15 +510,95 @@ function _renderMap() {
   else renderCircles(_mapData);
 }
 
-function loadMap() {
+var _mapAutoRefreshId = null;
+var _MAP_REFRESH_MS = 10000;
+
+function loadMap(silent) {
   if (typeof d3 === "undefined") { setTimeout(loadMap, 100); return; }
   var canvas = document.getElementById("map-canvas");
-  canvas.textContent = "Loading…";
+  if (!silent) canvas.textContent = "Loading…";
   fetch("/api/treemap").then(function(r){ return r.json(); }).then(function(data){
+    var changed = !_mapData || JSON.stringify(data) !== JSON.stringify(_mapData);
     _mapData = data;
-    _renderMap();
+    if (changed) _renderMap();
+    _updateRefreshIndicator();
   }).catch(function(err){
-    canvas.textContent = "Error loading map: " + err.message;
+    if (!silent) canvas.textContent = "Error loading map: " + err.message;
+  });
+}
+
+function _updateRefreshIndicator() {
+  var el = document.getElementById("map-refresh-indicator");
+  if (!el) return;
+  el.textContent = "↻ " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function _startMapAutoRefresh() {
+  if (_mapAutoRefreshId) return;
+  _mapAutoRefreshId = setInterval(function(){
+    if (document.getElementById("tab-map").classList.contains("active") && !document.hidden) {
+      loadMap(true);
+    }
+  }, _MAP_REFRESH_MS);
+}
+
+// ── Plan search ─────────────────────────────────────────────────────────────
+function _collectPlanLeaves(node, repo, out) {
+  if (!node) return;
+  if (node.kind === "repo" || node.kind === "worktree") repo = node.name;
+  if (node.kind === "plan" && node.path) {
+    out.push({
+      name: node.name, path: node.path, ext: node.ext || "md",
+      phase: node.phase || null, phase_status: node.phase_status || null,
+      claude_active: !!node.claude_active, repo: repo || ""
+    });
+  }
+  if (node.children) node.children.forEach(function(c){ _collectPlanLeaves(c, repo, out); });
+}
+
+function _renderSearchResults(query) {
+  var el = document.getElementById("map-search-results");
+  if (!_mapData || !query || query.length < 2) {
+    el.hidden = true; el.innerHTML = ""; return;
+  }
+  var all = [];
+  _collectPlanLeaves(_mapData, null, all);
+  var q = query.toLowerCase();
+  var matches = all.filter(function(p){
+    return p.name.toLowerCase().indexOf(q) !== -1 ||
+           (p.repo && p.repo.toLowerCase().indexOf(q) !== -1) ||
+           (p.phase && p.phase.toLowerCase().indexOf(q) !== -1);
+  });
+  // sort: claude_active first, then by repo+name
+  matches.sort(function(a,b){
+    if (a.claude_active !== b.claude_active) return a.claude_active ? -1 : 1;
+    return (a.repo + a.name).localeCompare(b.repo + b.name);
+  });
+  el.hidden = false;
+  if (!matches.length) {
+    el.innerHTML = '<div class="sr-empty">No plan files match "' + q + '"</div>';
+    return;
+  }
+  function highlight(s) {
+    var idx = s.toLowerCase().indexOf(q);
+    if (idx === -1) return s;
+    return s.slice(0, idx) + "<b>" + s.slice(idx, idx + q.length) + "</b>" + s.slice(idx + q.length);
+  }
+  el.innerHTML = matches.slice(0, 50).map(function(p){
+    var status = p.phase_status || "none";
+    return '<div class="sr-row" data-path="' + encodeURIComponent(p.path) + '" data-name="' + p.name + '">' +
+      '<span class="sr-status ' + status + '"></span>' +
+      '<span class="sr-name">' + highlight(p.name) +
+        (p.phase ? ' <span class="sr-repo">· ' + p.phase + '</span>' : '') +
+      '</span>' +
+      '<span class="sr-repo">' + p.repo + '</span>' +
+      (p.claude_active ? '<span class="sr-active">● editing</span>' : '<span class="sr-ext ' + p.ext + '">' + p.ext.toUpperCase() + '</span>') +
+    '</div>';
+  }).join("");
+  el.querySelectorAll(".sr-row").forEach(function(row){
+    row.addEventListener("click", function(){
+      openPlan(decodeURIComponent(row.dataset.path), row.dataset.name);
+    });
   });
 }
 
@@ -526,9 +612,24 @@ document.querySelectorAll(".map-view-btn").forEach(function(btn){
   });
 });
 
-// Lazy-load on first tab open
+// Search wiring (debounced)
+(function(){
+  var input = document.getElementById("map-search");
+  if (!input) return;
+  var to;
+  input.addEventListener("input", function(){
+    clearTimeout(to);
+    to = setTimeout(function(){ _renderSearchResults(input.value.trim()); }, 120);
+  });
+  input.addEventListener("keydown", function(e){
+    if (e.key === "Escape") { input.value = ""; _renderSearchResults(""); input.blur(); }
+  });
+})();
+
+// Lazy-load on first tab open + start auto-refresh
 document.querySelector("[data-tab='map']").addEventListener("click", function(){
   if (!mapLoaded) { loadMap(); mapLoaded = true; }
+  _startMapAutoRefresh();
 });
 
 // Resize

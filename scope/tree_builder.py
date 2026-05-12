@@ -60,7 +60,7 @@ def _phase_leaf(phase: dict) -> dict:
     }
 
 
-def _plan_file_leaf(f: dict, severity: Optional[str]) -> dict:
+def _plan_file_leaf(f: dict, severity: Optional[str], claude_active: bool = False) -> dict:
     size = max(1, int(f.get("size_bytes", 1) or 1))
     return {
         "name": f.get("name") or f["path"].split("/")[-1],
@@ -75,6 +75,7 @@ def _plan_file_leaf(f: dict, severity: Optional[str]) -> dict:
         "phase": f.get("phase"),
         "phase_status": f.get("phase_status"),
         "severity": severity,
+        "claude_active": claude_active,
     }
 
 
@@ -101,6 +102,11 @@ def build_tree(
 
     sev = _severity_map(findings)
     proc_cwds = {p.get("cwd", "") for p in processes}
+    # paths of plan files currently held open by any claude process
+    open_plan_paths: set[str] = set()
+    for p in processes:
+        for path in p.get("open_plans", []) or []:
+            open_plan_paths.add(path)
 
     # --- .claude region ---
     rules_prefix = f"{home_path}/.claude/rules/"
@@ -150,7 +156,8 @@ def build_tree(
             loose_files: list[dict] = []
             by_phase: dict[str, list[dict]] = {}
             for pf in plan_files:
-                leaf = _plan_file_leaf(pf, sev.get(pf["path"]))
+                active = pf["path"] in open_plan_paths
+                leaf = _plan_file_leaf(pf, sev.get(pf["path"]), claude_active=active)
                 if pf.get("phase"):
                     by_phase.setdefault(pf["phase"], []).append(leaf)
                 else:
