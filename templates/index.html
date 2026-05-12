@@ -5,6 +5,7 @@
   <title>scope</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script defer src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 </head>
 <body>
   <header>
@@ -99,7 +100,10 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
 
   <section id="tab-map" class="tab-panel">
     <div class="map-toolbar">
-      <div id="map-breadcrumb" class="map-breadcrumb"><span class="crumb">~</span></div>
+      <div class="map-view-toggle">
+        <button class="map-view-btn active" data-view="circles">◉ Circles</button>
+        <button class="map-view-btn" data-view="sunburst">◐ Sunburst</button>
+      </div>
       <div class="map-legend">
         <span><i class="dot dot-complete"></i> complete</span>
         <span><i class="dot dot-iterating"></i> iterating</span>
@@ -109,9 +113,20 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
         <span><i class="dot dot-high"></i> HIGH</span>
       </div>
     </div>
-    <div id="map-canvas" class="map-canvas">Loading…</div>
-    <div id="map-detail" class="map-detail"></div>
+    <div id="map-canvas" class="map-canvas">Click Map tab to load…</div>
+    <p class="map-hint">Click a circle/arc to zoom in · click background or center to zoom out · click any plan file to read it</p>
   </section>
+
+  <!-- Plan viewer modal -->
+  <div id="plan-modal-bg" class="modal-bg">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-head">
+        <span id="plan-modal-title" class="modal-title"></span>
+        <button class="modal-close" onclick="closePlanModal()">×</button>
+      </div>
+      <div id="plan-modal-body" class="modal-body"></div>
+    </div>
+  </div>
 
   <script>window.HOME_PATH = "{{ home_path }}";</script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>

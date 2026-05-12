@@ -54,11 +54,19 @@ def test_claude_files_split_into_rules():
     assert [c["name"] for c in rules_region["children"]] == ["workflow.md"]
 
 
-def test_repo_with_landmarks_and_planning():
+def test_repo_with_plan_files_and_planning():
     repo = {"path": "/Users/test/projects/foo", "branch": "main", "dirty": 0,
             "untracked": 0, "ahead": 0, "behind": 0, "stale": False}
-    landmarks = [_file("/Users/test/projects/foo/CLAUDE.md"),
-                 _file("/Users/test/projects/foo/README.md")]
+    plan_files = [
+        {"path": "/Users/test/projects/foo/CLAUDE.md", "name": "CLAUDE.md",
+         "size_bytes": 100, "tokens_est": 25, "age_days": 0, "ext": "md", "phase": None},
+        {"path": "/Users/test/projects/foo/.planning/phases/01-x/01-PLAN.md",
+         "name": "01-PLAN.md", "size_bytes": 200, "tokens_est": 50, "age_days": 0,
+         "ext": "md", "phase": "01-x", "phase_status": "complete"},
+        {"path": "/Users/test/projects/foo/.planning/phases/02-y/02-PLAN.md",
+         "name": "02-PLAN.md", "size_bytes": 150, "tokens_est": 40, "age_days": 0,
+         "ext": "md", "phase": "02-y", "phase_status": "iterating"},
+    ]
     planning = {
         "milestone": "v1.0", "status": "executing", "percent": 50,
         "total_phases": 2, "completed_phases": 1,
@@ -69,19 +77,21 @@ def test_repo_with_landmarks_and_planning():
     }
     t = build_tree(**_empty(
         repos=[repo],
-        list_landmarks=lambda p: landmarks if p == repo["path"] else [],
         scan_planning=lambda p: planning if p == repo["path"] else None,
+        list_plan_files=lambda p: plan_files if p == repo["path"] else [],
     ))
-    projects = t["children"][1]
-    assert len(projects["children"]) == 1
-    foo = projects["children"][0]
-    assert foo["kind"] == "repo"
-    assert foo["branch"] == "main"
-    group_names = [g["name"] for g in foo["children"]]
-    assert "human files" in group_names
+    foo = t["children"][1]["children"][0]
     plans = next(g for g in foo["children"] if g["name"].startswith("plans"))
     assert plans["percent"] == 50
-    assert [p["status"] for p in plans["children"]] == ["complete", "iterating"]
+    assert plans["file_count"] == 3
+    # Loose CLAUDE.md leaf + two phase children
+    kinds = [c["kind"] for c in plans["children"]]
+    assert kinds.count("plan") == 1  # CLAUDE.md loose
+    assert kinds.count("phase") == 2
+    phase_01 = next(c for c in plans["children"] if c.get("name") == "01-x")
+    assert phase_01["status"] == "complete"
+    assert phase_01["children"][0]["name"] == "01-PLAN.md"
+    assert phase_01["children"][0]["kind"] == "plan"
 
 
 def test_process_marks_repo_has_process():

@@ -116,6 +116,63 @@ code { background: var(--panel); padding: 2px 6px; border-radius: 4px;
   white-space: pre;
 }
 
+/* Map view toggle */
+.map-view-toggle { display: flex; gap: 2px; background: var(--panel); border: 1px solid var(--border);
+                   border-radius: 6px; padding: 3px; }
+.map-view-btn { background: transparent; border: none; color: var(--muted);
+                padding: 6px 14px; border-radius: 4px; font-size: 13px;
+                font-family: ui-monospace, monospace; cursor: pointer; }
+.map-view-btn:hover { color: var(--text); }
+.map-view-btn.active { background: var(--bg); color: var(--accent); }
+
+.map-hint { color: var(--muted); font-size: 11px; text-align: center;
+            margin-top: 10px; font-family: ui-monospace, monospace; }
+
+/* Circle packing */
+.cp-node circle { stroke: #06080c; stroke-width: 1.5; cursor: pointer; }
+.cp-node circle:hover { stroke: var(--accent); stroke-width: 2; }
+.cp-label { font: 11px ui-monospace, monospace; fill: #e6edf3; pointer-events: none;
+            text-anchor: middle; }
+.cp-label.dim { fill: #7d8590; font-size: 10px; }
+
+/* Sunburst */
+.sb-arc { cursor: pointer; stroke: #06080c; stroke-width: 1; }
+.sb-arc:hover { opacity: 0.85; }
+.sb-label { font: 10px ui-monospace, monospace; fill: #e6edf3; pointer-events: none;
+            text-anchor: middle; }
+
+/* Plan viewer modal */
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 200;
+            display: none; align-items: center; justify-content: center; }
+.modal-bg.open { display: flex; }
+.modal { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+         width: min(960px, 92vw); height: min(80vh, 820px); display: flex; flex-direction: column; }
+.modal-head { display: flex; justify-content: space-between; align-items: center;
+              padding: 12px 18px; border-bottom: 1px solid var(--border); }
+.modal-title { font: 600 14px ui-monospace, monospace; color: var(--text); }
+.modal-close { background: transparent; border: 1px solid var(--border); color: var(--muted);
+               width: 28px; height: 28px; border-radius: 4px; cursor: pointer; padding: 0;
+               font-size: 16px; line-height: 1; }
+.modal-close:hover { color: var(--text); border-color: var(--red); }
+.modal-body { flex: 1; overflow: auto; padding: 20px 28px; font-size: 14px; line-height: 1.6; }
+.modal-body h1 { font-size: 24px; margin-top: 0; color: var(--text); }
+.modal-body h2 { font-size: 18px; margin-top: 24px; color: var(--accent);
+                 padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.modal-body h3 { font-size: 15px; color: var(--text); margin-top: 18px; }
+.modal-body code { background: #0d1117; padding: 2px 6px; }
+.modal-body pre { background: #0d1117; padding: 12px 14px; border-radius: 6px; overflow-x: auto;
+                  border: 1px solid var(--border); margin: 10px 0; }
+.modal-body pre code { background: transparent; padding: 0; color: var(--text); }
+.modal-body table { border-collapse: collapse; margin: 10px 0; }
+.modal-body th, .modal-body td { border: 1px solid var(--border); padding: 6px 10px; }
+.modal-body th { background: var(--bg); }
+.modal-body blockquote { border-left: 3px solid var(--accent); margin: 10px 0; padding: 6px 16px;
+                         color: var(--muted); background: rgba(88,166,255,0.05); }
+.modal-body ul, .modal-body ol { padding-left: 24px; }
+.modal-body a { color: var(--accent); }
+.modal-body img { max-width: 100%; }
+.modal-body hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
 /* System Map — D3 zoomable treemap */
 .map-toolbar { display: flex; justify-content: space-between; align-items: center;
                margin-bottom: 12px; gap: 16px; flex-wrap: wrap; }

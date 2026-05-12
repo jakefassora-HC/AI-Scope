@@ -1,13 +1,30 @@
-"""GSD .planning/ directory scanner.
+"""Planning directory scanner.
 
-Surfaces milestone state and phase status for the Map treemap. Pure I/O over
-filesystem; no network. Tolerant of missing/malformed files — returns None
-when a repo has no usable planning data.
+Surfaces:
+  * milestone/phase state (parses GSD STATE.md frontmatter)
+  * the actual plan documents — markdown and html — that live inside
+    planning-like folders (.planning, plans, planning, docs) or at repo root
+    (CLAUDE.md, README.md, ROADMAP.md, etc).
+
+Pure I/O over filesystem; no network. Tolerant of missing files.
 """
 from __future__ import annotations
+import re
+from datetime import datetime, timezone
 from os import scandir
 from pathlib import Path
 from typing import Optional
+
+from scope.token_estimator import estimate_tokens_from_bytes
+
+PLAN_EXTS = (".md", ".html", ".htm")
+PLANNING_DIRS = (".planning", "plans", "planning", "docs", ".gsd")
+ROOT_PLAN_FILES = (
+    "CLAUDE.md", "README.md", "ROADMAP.md", "PROJECT.md",
+    "REQUIREMENTS.md", "BRIEF.md", "STATE.md", "AGENTS.md",
+)
+MAX_WALK_DEPTH = 4
+PHASE_DIR_RE = re.compile(r"\.planning/phases/([^/]+)/")
 
 
 def _parse_yaml_frontmatter(text: str) -> dict:
@@ -141,3 +158,89 @@ def scan_planning(repo_path: str) -> Optional[dict]:
         "completed_phases": completed,
         "phases": phases,
     }
+
+
+def _file_record(path: Path, rel: str, phase: Optional[str] = None,
+                 phase_status: Optional[str] = None) -> dict:
+    stat = path.stat()
+    mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+    return {
+        "path": str(path),
+        "name": path.name,
+        "rel": rel,
+        "ext": path.suffix.lower().lstrip("."),
+        "size_bytes": stat.st_size,
+        "tokens_est": estimate_tokens_from_bytes(stat.st_size),
+        "age_days": (datetime.now(tz=timezone.utc) - mtime).days,
+        "phase": phase,
+        "phase_status": phase_status,
+    }
+
+
+def _walk_plans(base: Path, repo_root: Path, depth: int = 0) -> list[dict]:
+    """Recursively collect *.md / *.html files under `base`."""
+    if depth > MAX_WALK_DEPTH:
+        return []
+    out: list[dict] = []
+    try:
+        entries = list(scandir(base))
+    except (OSError, PermissionError):
+        return out
+    for entry in entries:
+        if entry.name.startswith("."):
+            # allow `.planning` itself (entered via initial call) but skip nested dotdirs
+            if depth > 0:
+                continue
+        try:
+            if entry.is_dir(follow_symlinks=False):
+                out.extend(_walk_plans(Path(entry.path), repo_root, depth + 1))
+            elif entry.is_file(follow_symlinks=False) and entry.name.lower().endswith(PLAN_EXTS):
+                p = Path(entry.path)
+                rel = str(p.relative_to(repo_root))
+                m = PHASE_DIR_RE.search(rel + "/")
+                phase = m.group(1) if m else None
+                phase_status = None
+                if phase:
+                    phase_status = _phase_status(repo_root / ".planning" / "phases" / phase)
+                out.append(_file_record(p, rel, phase=phase, phase_status=phase_status))
+        except (OSError, PermissionError):
+            continue
+    return out
+
+
+def list_plan_files(repo_path: str) -> list[dict]:
+    """Return every plan document (md/html) discoverable in a repo.
+
+    Coverage:
+      * top-level ROOT_PLAN_FILES (CLAUDE.md, README.md, ROADMAP.md, …)
+      * recursive walk of `.planning/`, `plans/`, `planning/`, `docs/`, `.gsd/`
+        (capped depth to keep scans fast on large doc trees)
+
+    Each record carries a `phase` (e.g. "06-dedup-scoring-replies") and
+    `phase_status` when the file lives under `.planning/phases/<phase>/`.
+    """
+    root = Path(repo_path)
+    if not root.is_dir():
+        return []
+    seen: set[str] = set()
+    out: list[dict] = []
+
+    # Top-level well-known docs
+    for name in ROOT_PLAN_FILES:
+        p = root / name
+        if p.is_file():
+            rec = _file_record(p, name)
+            seen.add(rec["path"])
+            out.append(rec)
+
+    # Recursive walks of planning-like dirs
+    for d in PLANNING_DIRS:
+        sub = root / d
+        if sub.is_dir():
+            for rec in _walk_plans(sub, root):
+                if rec["path"] in seen:
+                    continue
+                seen.add(rec["path"])
+                out.append(rec)
+
+    return out

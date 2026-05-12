@@ -219,7 +219,7 @@ renderInsights();
   });
 })();
 
-// ── System Map — D3 zoomable treemap ─────────────────────────────────────────
+// ── System Map — D3 circle packing + sunburst (toggle) ──────────────────────
 
 var _mapTooltip = (function() {
   var el = document.createElement("div");
@@ -234,306 +234,317 @@ function activateTab(name) {
 }
 
 var mapLoaded = false;
-var _tmState = null; // {root, current, svg, w, h}
+var _mapData = null;
+var _mapView = "circles";
 
-function _kindClass(d) {
-  var kind = d.data.kind;
-  if (kind === "phase") return "tm-phase-" + (d.data.status || "draft");
-  return "tm-" + kind;
+var STATUS_COLOR = { complete: "#3fb950", iterating: "#58a6ff", planning: "#8957e5", draft: "#7d8590" };
+var KIND_COLOR = {
+  root: "#0d1117", region: "#1c2230", repo: "#2d6cdf", worktree: "#1f6feb",
+  group: "#3b3654", plan: "#7d8590", phase: "#3fb950", process: "#2ea043",
+  file: "#7d8590", placeholder: "#21262d"
+};
+
+function _showTip(html, e) {
+  _mapTooltip.innerHTML = html;
+  _mapTooltip.style.display = "block";
+  _mapTooltip.style.left = (e.pageX + 12) + "px";
+  _mapTooltip.style.top = (e.pageY + 12) + "px";
 }
+function _hideTip() { _mapTooltip.style.display = "none"; }
 
-function _decorateClasses(d) {
-  var classes = ["tm-rect", _kindClass(d)];
-  if (d.data.has_process) classes.push("has-process");
-  if (d.data.dirty) classes.push("is-dirty");
-  if (d.data.severity === "HIGH") classes.push("sev-HIGH");
-  else if (d.data.severity === "MED") classes.push("sev-MED");
-  return classes.join(" ");
-}
-
-function _renderBreadcrumb(path, onClick) {
-  var bc = document.getElementById("map-breadcrumb");
-  bc.innerHTML = "";
-  path.forEach(function(node, i) {
-    if (i > 0) {
-      var sep = document.createElement("span");
-      sep.className = "sep"; sep.textContent = "›";
-      bc.appendChild(sep);
-    }
-    var c = document.createElement("span");
-    c.className = "crumb" + (i === path.length - 1 ? " current" : "");
-    c.textContent = node.data.name;
-    c.addEventListener("click", function() { onClick(node); });
-    bc.appendChild(c);
+// Plan viewer modal
+function openPlan(path, name) {
+  var titleEl = document.getElementById("plan-modal-title");
+  var bodyEl = document.getElementById("plan-modal-body");
+  titleEl.textContent = name || path;
+  bodyEl.innerHTML = "<p style='color:var(--muted)'>Loading…</p>";
+  document.getElementById("plan-modal-bg").classList.add("open");
+  fetch("/api/plan?path=" + encodeURIComponent(path)).then(function(r){return r.json();}).then(function(d){
+    if (d.error) { bodyEl.innerHTML = "<p style='color:var(--red)'>" + d.error + "</p>"; return; }
+    if (d.ext === "md" && typeof marked !== "undefined") bodyEl.innerHTML = marked.parse(d.content);
+    else if (d.ext === "html" || d.ext === "htm") bodyEl.innerHTML = d.content;
+    else bodyEl.innerHTML = "<pre>" + d.content.replace(/</g, "&lt;") + "</pre>";
   });
 }
-
-function _renderDetail(d) {
-  var el = document.getElementById("map-detail");
-  if (!d) { el.innerHTML = '<span style="color:var(--muted)">Click a tile to drill in. Click the background or breadcrumb to zoom out.</span>'; return; }
-  var kind = d.data.kind;
-  var html = '<div class="md-title">' + d.data.name + ' <span style="color:var(--muted);font-weight:400">· ' + kind + '</span></div>';
-  var meta = [];
-  if (kind === "repo" || kind === "worktree") {
-    if (d.data.branch) meta.push("branch: <code>" + d.data.branch + "</code>");
-    var status = [];
-    if (d.data.dirty) status.push(d.data.dirty + " dirty");
-    if (d.data.untracked) status.push(d.data.untracked + " untracked");
-    if (d.data.ahead) status.push("↑" + d.data.ahead);
-    if (d.data.behind) status.push("↓" + d.data.behind);
-    meta.push(status.length ? status.join(", ") : '<span style="color:var(--green)">clean</span>');
-    if (d.data.stale) meta.push('<span style="color:var(--amber)">STALE</span>');
-    if (d.data.has_process) meta.push('<span style="color:#2ea043">● claude running</span>');
-  } else if (kind === "file") {
-    if (d.data.path) meta.push("<code>" + d.data.path + "</code>");
-    meta.push(fmtBytes(d.data.size_bytes || 0));
-    meta.push("~" + (d.data.tokens_est || 0).toLocaleString() + " tok");
-    if (d.data.age_days !== undefined) meta.push(d.data.age_days + "d old");
-  } else if (kind === "phase") {
-    meta.push("status: <strong>" + d.data.status + "</strong>");
-    if (d.data.path) meta.push("<code>" + d.data.path + "</code>");
-  } else if (kind === "group" && d.data.percent !== undefined) {
-    meta.push(d.data.completed_phases + "/" + d.data.total_phases + " phases");
-    meta.push('<span class="md-progress"><span style="width:' + d.data.percent + '%"></span></span> ' + d.data.percent + "%");
-    if (d.data.subtitle) meta.push(d.data.subtitle);
-  } else if (kind === "region" && d.data.subtitle) {
-    meta.push(d.data.subtitle);
-  } else if (kind === "process") {
-    meta.push("PID " + d.data.pid);
-    if (d.data.cwd) meta.push("cwd: <code>" + d.data.cwd + "</code>");
-  }
-  if (d.data.severity) meta.push('<span style="color:var(--red)">' + d.data.severity + " severity</span>");
-  if (meta.length) html += '<div class="md-meta">' + meta.map(function(m){ return "<span>" + m + "</span>"; }).join("") + "</div>";
-  el.innerHTML = html;
+function closePlanModal() {
+  document.getElementById("plan-modal-bg").classList.remove("open");
 }
+document.getElementById("plan-modal-bg").addEventListener("click", closePlanModal);
+document.addEventListener("keydown", function(e){ if (e.key === "Escape") closePlanModal(); });
 
-function _statusDotColor(status) {
-  return status === "complete" ? "#3fb950"
-       : status === "iterating" ? "#58a6ff"
-       : status === "planning" ? "#8957e5"
-       : "#7d8590";
-}
+// ── Circle packing ──────────────────────────────────────────────────────────
+function renderCircles(data) {
+  var stage = document.getElementById("map-canvas");
+  stage.innerHTML = "";
+  var rect = stage.getBoundingClientRect();
+  var W = rect.width, H = rect.height;
+  if (W < 50) return;
+  var D = Math.min(W, H);
 
-function _zoomTo(node) {
-  var s = _tmState;
-  if (!s) return;
-  s.current = node;
-  _drawTreemap();
-  _renderDetail(null);
-}
+  var root = d3.hierarchy(data)
+    .sum(function(d){ return d.children ? 0 : (d.value || 1); })
+    .sort(function(a,b){ return (b.value||0) - (a.value||0); });
+  d3.pack().size([D, D]).padding(4)(root);
 
-function _drawTreemap() {
-  var s = _tmState;
-  var canvas = document.getElementById("map-canvas");
-  var rect = canvas.getBoundingClientRect();
-  var w = rect.width, h = rect.height;
-  s.w = w; s.h = h;
+  var svg = d3.select(stage).append("svg")
+    .attr("viewBox", -D/2 + " " + -D/2 + " " + D + " " + D)
+    .attr("preserveAspectRatio", "xMidYMid meet")
+    .style("background", "#06080c");
 
-  // Build a sub-hierarchy rooted at current
-  var current = s.current;
-  // d3.treemap operates on a hierarchy; rebuild from current node's data so values re-sum scoped
-  var sub = d3.hierarchy(current.data)
-    .sum(function(d) { return d.children ? 0 : (d.value || 1); })
-    .sort(function(a, b) { return (b.value || 0) - (a.value || 0); });
+  var focus = root, view;
 
-  d3.treemap()
-    .size([w, h])
-    .paddingTop(function(d) { return d.depth === 0 ? 28 : (d.children ? 22 : 2); })
-    .paddingInner(4)
-    .paddingOuter(4)
-    .round(true)(sub);
+  var node = svg.append("g").selectAll("g")
+    .data(root.descendants().slice(1))
+    .join("g").attr("class", "cp-node");
 
-  // Build breadcrumb path from root down to current
-  var path = [];
-  var n = current;
-  while (n) { path.unshift(n); n = n.parent; }
-  _renderBreadcrumb(path, _zoomTo);
-
-  // Render
-  var svg = s.svg;
-  svg.selectAll("*").remove();
-
-  // Root title bar
-  svg.append("text")
-    .attr("class", "tm-label tm-region-title")
-    .attr("x", 12).attr("y", 19)
-    .attr("fill", "#7d8590")
-    .text(current.data.name + (current.data.subtitle ? "  ·  " + current.data.subtitle : ""));
-
-  var descendants = sub.descendants().filter(function(d) { return d.depth > 0; });
-
-  var g = svg.selectAll("g.tm-cell")
-    .data(descendants, function(d) { return d.data.path || d.data.name + ":" + d.depth; })
-    .enter().append("g")
-    .attr("class", function(d) { return "tm-cell" + (d.children ? "" : " tm-leaf"); })
-    .attr("transform", function(d) { return "translate(" + d.x0 + "," + d.y0 + ")"; });
-
-  g.append("rect")
-    .attr("class", _decorateClasses)
-    .attr("width", function(d) { return Math.max(0, d.x1 - d.x0); })
-    .attr("height", function(d) { return Math.max(0, d.y1 - d.y0); });
-
-  // Title for branches (regions/repos/groups): top-left, monospace
-  g.filter(function(d) { return d.children; }).each(function(d) {
-    var gw = d.x1 - d.x0, gh = d.y1 - d.y0;
-    if (gw < 50 || gh < 20) return;
-    var sel = d3.select(this);
-    sel.append("text")
-      .attr("class", "tm-label tm-title")
-      .attr("x", 8).attr("y", 14)
-      .text(d.data.name);
-    // subtitle: branch info, percent, etc.
-    var sub = null;
-    if (d.data.kind === "repo" || d.data.kind === "worktree") {
-      var bits = [];
-      if (d.data.branch) bits.push(d.data.branch);
-      if (d.data.dirty) bits.push(d.data.dirty + "Δ");
-      if (d.data.ahead) bits.push("↑" + d.data.ahead);
-      if (d.data.behind) bits.push("↓" + d.data.behind);
-      sub = bits.join(" · ");
-    } else if (d.data.kind === "group" && d.data.percent !== undefined) {
-      sub = d.data.completed_phases + "/" + d.data.total_phases + " · " + d.data.percent + "%";
-    } else if (d.data.subtitle) {
-      sub = d.data.subtitle;
-    }
-    if (sub && gw > 80) {
-      sel.append("text")
-        .attr("class", "tm-label tm-sub")
-        .attr("x", gw - 8).attr("y", 14)
-        .attr("text-anchor", "end")
-        .text(sub);
-    }
-    // running-process pulse dot
-    if (d.data.has_process) {
-      sel.append("circle")
-        .attr("class", "tm-status-dot")
-        .attr("cx", gw - 10).attr("cy", gh - 10)
-        .attr("r", 4)
-        .attr("fill", "#2ea043")
-        .style("filter", "drop-shadow(0 0 4px #2ea043)");
-    }
-  });
-
-  // Leaf labels
-  g.filter(function(d) { return !d.children; }).each(function(d) {
-    var gw = d.x1 - d.x0, gh = d.y1 - d.y0;
-    if (gw < 30 || gh < 14) return;
-    var sel = d3.select(this);
-    // truncate label to fit
-    var label = d.data.name;
-    var maxChars = Math.floor(gw / 7);
-    if (label.length > maxChars) label = label.slice(0, Math.max(0, maxChars - 1)) + "…";
-    sel.append("text")
-      .attr("class", "tm-label tm-leaf-label")
-      .attr("x", 6).attr("y", 14)
-      .text(label);
-    // phase status dot
-    if (d.data.kind === "phase" && gw > 50 && gh > 22) {
-      sel.append("circle")
-        .attr("class", "tm-status-dot")
-        .attr("cx", gw - 8).attr("cy", 10)
-        .attr("r", 3.5)
-        .attr("fill", _statusDotColor(d.data.status));
-    }
-  });
-
-  // Interaction
-  g.on("mouseover", function(event, d) {
-      var t = d.data.name;
-      if (d.data.kind === "file") t += " · " + fmtBytes(d.data.size_bytes || 0) + " · ~" + (d.data.tokens_est || 0) + " tok";
-      else if (d.data.kind === "phase") t += " · " + d.data.status;
-      else if (d.data.path) t += " · " + d.data.path;
-      _mapTooltip.textContent = t;
-      _mapTooltip.style.display = "block";
-    })
-    .on("mousemove", function(event) {
-      _mapTooltip.style.left = (event.pageX + 12) + "px";
-      _mapTooltip.style.top = (event.pageY + 12) + "px";
-    })
-    .on("mouseout", function() { _mapTooltip.style.display = "none"; })
-    .on("click", function(event, d) {
-      event.stopPropagation();
-      _renderDetail(d);
-      // drill in: only branches with children
-      if (d.children && d.children.length) {
-        // find the equivalent node in the master root by data identity (path or chain)
-        var target = _findInRoot(s.root, d);
-        if (target) _zoomTo(target);
-      } else if (d.data.kind === "file" && d.data.path) {
-        activateTab("context");
-      } else if (d.data.kind === "process") {
-        activateTab("processes");
+  node.append("circle")
+    .attr("fill", function(d){
+      var k = d.data.kind;
+      if (k === "phase") return STATUS_COLOR[d.data.status] || "#7d8590";
+      if (k === "plan") {
+        var s = d.data.phase_status; if (s) return STATUS_COLOR[s] || "#7d8590";
+        return d.data.ext === "html" ? "#ffa657" : "#58a6ff";
       }
-    });
+      if (d.data.has_process) return "#2ea043";
+      if (d.data.severity === "HIGH") return "#f85149";
+      if (d.data.dirty) return "#d29922";
+      return KIND_COLOR[k] || "#21262d";
+    })
+    .attr("fill-opacity", function(d){ return d.children ? 0.35 : 0.85; })
+    .on("click", function(event, d){
+      event.stopPropagation();
+      if (!d.children && d.data.kind === "plan" && d.data.path) {
+        openPlan(d.data.path, d.data.rel || d.data.name); return;
+      }
+      if (focus !== d) zoom(d);
+    })
+    .on("mouseover", function(e, d){
+      var parts = ["<b>" + d.data.name + "</b> · " + (d.data.kind || "")];
+      if (d.data.status) parts.push(d.data.status);
+      if (d.data.phase_status) parts.push(d.data.phase_status);
+      if (d.data.branch) parts.push("branch: " + d.data.branch);
+      if (d.data.rel) parts.push(d.data.rel);
+      _showTip(parts.join(" · "), e);
+    })
+    .on("mousemove", function(e){ _mapTooltip.style.left = (e.pageX+12)+"px"; _mapTooltip.style.top = (e.pageY+12)+"px"; })
+    .on("mouseout", _hideTip);
 
-  svg.on("click", function() {
-    // zoom out one level on background click
-    if (s.current.parent) _zoomTo(s.current.parent);
-  });
+  var label = svg.append("g").style("pointer-events", "none").selectAll("text")
+    .data(root.descendants().slice(1))
+    .join("text")
+    .attr("class", function(d){ return "cp-label" + (d.depth > 2 ? " dim" : ""); })
+    .style("fill-opacity", function(d){ return labelVisible(d, root) ? 1 : 0; })
+    .style("display", function(d){ return labelVisible(d, root) ? "inline" : "none"; })
+    .text(function(d){ return fitLabel(d.data.name, d.r); });
+
+  var centerName = svg.append("text").attr("text-anchor", "middle").attr("dy", "-0.4em")
+    .style("font", "600 14px ui-monospace, monospace").style("fill", "#7d8590").style("pointer-events", "none");
+  var centerHint = svg.append("text").attr("text-anchor", "middle").attr("dy", "1em")
+    .style("font", "10px ui-monospace, monospace").style("fill", "#7d8590").style("pointer-events", "none");
+
+  svg.on("click", function(){ zoom(focus.parent || root); });
+  zoomTo([root.x, root.y, root.r * 2]);
+
+  function labelVisible(d, f) {
+    if (d.parent !== f) return false;
+    if (!d.children) return d.r > 14;
+    return d.r > 24;
+  }
+  function fitLabel(name, r) {
+    var max = Math.max(3, Math.floor(r / 4));
+    return name.length > max ? name.slice(0, Math.max(2, max - 1)) + "…" : name;
+  }
+  function zoomTo(v) {
+    var k = D / v[2]; view = v;
+    node.attr("transform", function(d){ return "translate(" + (d.x - v[0]) * k + "," + (d.y - v[1]) * k + ")"; });
+    label.attr("transform", function(d){ return "translate(" + (d.x - v[0]) * k + "," + (d.y - v[1]) * k + ")"; });
+    node.select("circle").attr("r", function(d){ return d.r * k; });
+    label.style("font-size", function(d){ return Math.max(9, Math.min(16, d.r * k / 4)) + "px"; });
+  }
+  function zoom(d) {
+    focus = d;
+    centerName.text(focus === root ? "" : focus.data.name);
+    centerHint.text(focus === root ? "" : "click background to zoom out");
+    var tr = svg.transition().duration(650)
+      .tween("zoom", function(){ var i = d3.interpolateZoom(view, [focus.x, focus.y, focus.r * 2]); return function(t){ zoomTo(i(t)); }; });
+    label.transition(tr)
+      .style("fill-opacity", function(d2){ return labelVisible(d2, focus) ? 1 : 0; })
+      .on("start", function(d2){ if (labelVisible(d2, focus)) this.style.display = "inline"; })
+      .on("end", function(d2){ if (!labelVisible(d2, focus)) this.style.display = "none"; });
+  }
 }
 
-function _findInRoot(root, target) {
-  // Match by (name + depth chain) since data refs differ between rebuilt hierarchies
-  var chain = [];
-  var n = target;
-  while (n) { chain.unshift(n.data.name); n = n.parent; }
-  var cur = root;
-  // chain[0] is root name; descend matching by name
-  for (var i = 1; i < chain.length; i++) {
-    if (!cur.children) return null;
-    var found = null;
-    for (var j = 0; j < cur.children.length; j++) {
-      if (cur.children[j].data.name === chain[i]) { found = cur.children[j]; break; }
-    }
-    if (!found) return null;
-    cur = found;
+// ── Sunburst ────────────────────────────────────────────────────────────────
+function renderSunburst(data) {
+  var stage = document.getElementById("map-canvas");
+  stage.innerHTML = "";
+  var rect = stage.getBoundingClientRect();
+  var W = rect.width, H = rect.height;
+  if (W < 50) return;
+  var VISIBLE_DEPTH = 3;
+  var radius = Math.min(W, H) / 2 - 20;
+  var ringR = radius / (VISIBLE_DEPTH + 1);
+
+  var root = d3.hierarchy(data)
+    .sum(function(d){ return d.children ? 0 : (d.value || 1); })
+    .sort(function(a,b){ return (b.value||0) - (a.value||0); });
+  d3.partition().size([2 * Math.PI, root.height + 1])(root);
+  root.each(function(d){ d.current = d; });
+
+  var arc = d3.arc()
+    .startAngle(function(d){ return d.x0; }).endAngle(function(d){ return d.x1; })
+    .padAngle(function(d){ return Math.min((d.x1 - d.x0) / 2, 0.004); })
+    .padRadius(radius * 1.5)
+    .innerRadius(function(d){ return d.y0 * ringR; })
+    .outerRadius(function(d){ return Math.max(d.y0 * ringR, d.y1 * ringR - 1.5); });
+
+  var svg = d3.select(stage).append("svg")
+    .attr("viewBox", (-W/2) + " " + (-H/2) + " " + W + " " + H)
+    .attr("preserveAspectRatio", "xMidYMid meet")
+    .style("background", "#06080c");
+
+  var path = svg.append("g").selectAll("path")
+    .data(root.descendants().slice(1))
+    .join("path")
+    .attr("class", "sb-arc")
+    .attr("fill", arcColor)
+    .attr("fill-opacity", function(d){ return arcVisible(d.current) ? (d.children ? 0.6 : 0.88) : 0; })
+    .attr("pointer-events", function(d){ return arcVisible(d.current) ? "auto" : "none"; })
+    .attr("d", function(d){ return arc(d.current); })
+    .on("click", clicked)
+    .on("mouseover", function(e, d){
+      var parts = ["<b>" + d.data.name + "</b> · " + d.data.kind];
+      if (d.data.status) parts.push(d.data.status);
+      if (d.data.phase_status) parts.push(d.data.phase_status);
+      _showTip(parts.join(" · "), e);
+    })
+    .on("mousemove", function(e){ _mapTooltip.style.left = (e.pageX+12)+"px"; _mapTooltip.style.top = (e.pageY+12)+"px"; })
+    .on("mouseout", _hideTip);
+
+  var label = svg.append("g").style("pointer-events", "none").selectAll("text")
+    .data(root.descendants().slice(1))
+    .join("text")
+    .attr("class", "sb-label").attr("dy", "0.35em")
+    .attr("fill-opacity", function(d){ return +labelVisible(d.current); })
+    .attr("transform", function(d){ return labelTransform(d.current); })
+    .text(function(d){ return fitArcLabel(d, d.current); });
+
+  var center = svg.append("circle").datum(root)
+    .attr("r", ringR * 0.95)
+    .attr("fill", "#0d1117").attr("stroke", "#30363d")
+    .attr("pointer-events", "all").style("cursor", "pointer")
+    .on("click", clicked);
+  var centerName = svg.append("text").attr("text-anchor", "middle").attr("dy", "-0.3em")
+    .attr("fill", "#e6edf3").style("font", "600 14px ui-monospace, monospace")
+    .style("pointer-events", "none").text("~");
+  var centerHint = svg.append("text").attr("text-anchor", "middle").attr("dy", "1.1em")
+    .attr("fill", "#7d8590").style("font", "10px ui-monospace, monospace")
+    .style("pointer-events", "none").text("scope");
+
+  function arcColor(d) {
+    if (d.data.kind === "phase") return STATUS_COLOR[d.data.status] || "#7d8590";
+    if (d.data.kind === "plan") return STATUS_COLOR[d.data.phase_status || "draft"];
+    if (d.data.has_process) return "#2ea043";
+    return KIND_COLOR[d.data.kind] || "#3a3f4b";
   }
-  return cur;
+
+  function clicked(event, p) {
+    if (!p.children && p.data.kind === "plan" && p.data.path) {
+      openPlan(p.data.path, p.data.rel || p.data.name); return;
+    }
+    if (event) event.stopPropagation();
+    center.datum(p.parent || root);
+    centerName.text(p === root ? "~" : p.data.name);
+    centerHint.text(p === root ? "scope" : "click center to zoom out");
+    root.each(function(d){
+      d.target = {
+        x0: Math.max(0, Math.min(1, (d.x0 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
+        x1: Math.max(0, Math.min(1, (d.x1 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
+        y0: Math.max(0, d.y0 - p.depth),
+        y1: Math.max(0, d.y1 - p.depth)
+      };
+    });
+    var tr = svg.transition().duration(650);
+    path.transition(tr)
+      .tween("data", function(d){ var i = d3.interpolate(d.current, d.target); return function(t){ d.current = i(t); }; })
+      .filter(function(d){ return +this.getAttribute("fill-opacity") || arcVisible(d.target); })
+      .attr("fill-opacity", function(d){ return arcVisible(d.target) ? (d.children ? 0.6 : 0.88) : 0; })
+      .attr("pointer-events", function(d){ return arcVisible(d.target) ? "auto" : "none"; })
+      .attrTween("d", function(d){ return function(){ return arc(d.current); }; });
+    label.transition(tr)
+      .filter(function(d){ return +this.getAttribute("fill-opacity") || labelVisible(d.target); })
+      .attr("fill-opacity", function(d){ return +labelVisible(d.target); })
+      .attrTween("transform", function(d){ return function(){ return labelTransform(d.current); }; })
+      .on("end", function(d){ d3.select(this).text(fitArcLabel(d, d.target)); });
+  }
+  function arcVisible(d){ return d.y1 > 0 && d.y1 <= VISIBLE_DEPTH + 1 && d.y0 >= 1 && d.x1 > d.x0; }
+  function labelVisible(d) {
+    if (!arcVisible(d)) return false;
+    var arcLen = (d.x1 - d.x0) * ((d.y0 + d.y1) / 2) * ringR;
+    var thick = (d.y1 - d.y0) * ringR;
+    return arcLen > 36 && thick > 12;
+  }
+  function labelTransform(d) {
+    var x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+    var y = (d.y0 + d.y1) / 2 * ringR;
+    return "rotate(" + (x - 90) + ") translate(" + y + ",0) rotate(" + (x < 180 ? 0 : 180) + ")";
+  }
+  function fitArcLabel(d, projected) {
+    var arcLen = (projected.x1 - projected.x0) * ((projected.y0 + projected.y1) / 2) * ringR;
+    var max = Math.max(3, Math.floor(arcLen / 6.2));
+    var name = d.data.name || "";
+    return name.length > max ? name.slice(0, Math.max(2, max - 1)) + "…" : name;
+  }
+}
+
+// ── Dispatcher / view toggle ────────────────────────────────────────────────
+function _renderMap() {
+  if (!_mapData) return;
+  if (_mapView === "sunburst") renderSunburst(_mapData);
+  else renderCircles(_mapData);
 }
 
 function loadMap() {
   if (typeof d3 === "undefined") { setTimeout(loadMap, 100); return; }
-  fetch("/api/treemap").then(function(r) { return r.json(); }).then(function(data) {
-    var canvas = document.getElementById("map-canvas");
-    if (!canvas) return;
-    canvas.innerHTML = "";
-
-    var root = d3.hierarchy(data)
-      .sum(function(d) { return d.children ? 0 : (d.value || 1); })
-      .sort(function(a, b) { return (b.value || 0) - (a.value || 0); });
-
-    var svg = d3.select(canvas).append("svg")
-      .attr("preserveAspectRatio", "xMidYMid meet");
-
-    _tmState = { root: root, current: root, svg: svg };
-    _drawTreemap();
-    _renderDetail(null);
-
-    // Re-render on window resize
-    var _resizeTO;
-    window.addEventListener("resize", function() {
-      clearTimeout(_resizeTO);
-      _resizeTO = setTimeout(function() {
-        if (_tmState) _drawTreemap();
-      }, 150);
-    });
-  }).catch(function(err) {
-    var canvas = document.getElementById("map-canvas");
-    if (canvas) canvas.textContent = "Error loading map: " + err.message;
+  var canvas = document.getElementById("map-canvas");
+  canvas.textContent = "Loading…";
+  fetch("/api/treemap").then(function(r){ return r.json(); }).then(function(data){
+    _mapData = data;
+    _renderMap();
+  }).catch(function(err){
+    canvas.textContent = "Error loading map: " + err.message;
   });
 }
 
-// Lazy-load map on first click
-document.querySelector("[data-tab='map']").addEventListener("click", function() {
+// View toggle buttons
+document.querySelectorAll(".map-view-btn").forEach(function(btn){
+  btn.addEventListener("click", function(){
+    document.querySelectorAll(".map-view-btn").forEach(function(b){ b.classList.remove("active"); });
+    btn.classList.add("active");
+    _mapView = btn.dataset.view;
+    _renderMap();
+  });
+});
+
+// Lazy-load on first tab open
+document.querySelector("[data-tab='map']").addEventListener("click", function(){
   if (!mapLoaded) { loadMap(); mapLoaded = true; }
 });
 
-// Refresh integration: reload map if it's the active tab
+// Resize
+var _mapResizeTO;
+window.addEventListener("resize", function(){
+  clearTimeout(_mapResizeTO);
+  _mapResizeTO = setTimeout(function(){
+    if (_mapData && document.getElementById("tab-map").classList.contains("active")) _renderMap();
+  }, 150);
+});
+
+// Refresh integration
 var _origLoadAll2 = loadAll;
-loadAll = function() {
+loadAll = function(){
   _origLoadAll2();
-  var mapPanel = document.getElementById("tab-map");
-  if (mapPanel && mapPanel.classList.contains("active")) {
+  if (document.getElementById("tab-map").classList.contains("active")) {
     mapLoaded = false;
     loadMap();
     mapLoaded = true;

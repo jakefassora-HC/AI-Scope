@@ -60,6 +60,24 @@ def _phase_leaf(phase: dict) -> dict:
     }
 
 
+def _plan_file_leaf(f: dict, severity: Optional[str]) -> dict:
+    size = max(1, int(f.get("size_bytes", 1) or 1))
+    return {
+        "name": f.get("name") or f["path"].split("/")[-1],
+        "kind": "plan",
+        "path": f["path"],
+        "rel": f.get("rel", ""),
+        "ext": f.get("ext", "md"),
+        "value": size,
+        "size_bytes": size,
+        "tokens_est": f.get("tokens_est", 0),
+        "age_days": f.get("age_days", 0),
+        "phase": f.get("phase"),
+        "phase_status": f.get("phase_status"),
+        "severity": severity,
+    }
+
+
 def build_tree(
     *,
     claude_files: list[dict],
@@ -71,12 +89,15 @@ def build_tree(
     home_path: str,
     list_landmarks: Optional[Callable[[str], list[dict]]] = None,
     scan_planning: Optional[Callable[[str], Optional[dict]]] = None,
+    list_plan_files: Optional[Callable[[str], list[dict]]] = None,
 ) -> dict:
     """Build a d3.hierarchy-shaped tree from scanner outputs."""
     if list_landmarks is None:
         list_landmarks = lambda _: []
     if scan_planning is None:
         scan_planning = lambda _: None
+    if list_plan_files is None:
+        list_plan_files = lambda _: []
 
     sev = _severity_map(findings)
     proc_cwds = {p.get("cwd", "") for p in processes}
@@ -114,46 +135,56 @@ def build_tree(
         has_proc = rpath in proc_cwds
         rsev = sev.get(rpath)
 
-        # human files: landmarks + project_md that live in this repo
-        landmark_paths: set[str] = set()
-        files: list[dict] = []
-        for lm in list_landmarks(rpath):
-            landmark_paths.add(lm["path"])
-            files.append(_file_leaf(lm, sev.get(lm["path"])))
-        for pm in project_md:
-            ppath = pm["path"]
-            if (
-                ppath not in landmark_paths
-                and ppath not in claude_file_paths
-                and ppath.startswith(rpath + "/")
-            ):
-                landmark_paths.add(ppath)
-                files.append(_file_leaf(pm, sev.get(ppath)))
-
         children: list[dict] = []
-        if files:
-            children.append({
-                "name": "human files",
-                "kind": "group",
-                "children": files,
-            })
 
-        # plans (GSD .planning)
+        # Plans = all md/html docs in planning-like folders. Group by phase
+        # when the file lives under .planning/phases/<phase>/.
+        plan_files = list_plan_files(rpath)
         planning = scan_planning(rpath)
-        if planning and planning.get("phases"):
+        if plan_files or (planning and planning.get("phases")):
+            phase_status_by_name: dict[str, str] = {}
+            if planning and planning.get("phases"):
+                phase_status_by_name = {p["name"]: p.get("status", "draft") for p in planning["phases"]}
+
+            # bucket plan files: loose vs by phase
+            loose_files: list[dict] = []
+            by_phase: dict[str, list[dict]] = {}
+            for pf in plan_files:
+                leaf = _plan_file_leaf(pf, sev.get(pf["path"]))
+                if pf.get("phase"):
+                    by_phase.setdefault(pf["phase"], []).append(leaf)
+                else:
+                    loose_files.append(leaf)
+
+            phase_children: list[dict] = []
+            for phase_name in sorted(set(list(by_phase.keys()) + list(phase_status_by_name.keys()))):
+                status = phase_status_by_name.get(phase_name, "draft")
+                phase_children.append({
+                    "name": phase_name,
+                    "kind": "phase",
+                    "status": status,
+                    "children": by_phase.get(phase_name, [{
+                        "name": "(no files)", "kind": "placeholder", "value": 1,
+                    }]),
+                })
+
+            plans_children = list(loose_files) + phase_children
             label = "plans"
-            milestone = planning.get("milestone") or ""
+            milestone = (planning or {}).get("milestone") or ""
+            percent = (planning or {}).get("percent", 0) if planning else 0
             if milestone:
-                label = f"plans · {milestone} · {planning.get('percent', 0)}%"
+                label = f"plans · {milestone} · {percent}%"
+
             children.append({
                 "name": label,
                 "kind": "group",
-                "subtitle": planning.get("status", ""),
+                "subtitle": (planning or {}).get("status", ""),
                 "milestone": milestone,
-                "percent": planning.get("percent", 0),
-                "completed_phases": planning.get("completed_phases", 0),
-                "total_phases": planning.get("total_phases", 0),
-                "children": [_phase_leaf(p) for p in planning["phases"]],
+                "percent": percent,
+                "completed_phases": (planning or {}).get("completed_phases", 0) if planning else 0,
+                "total_phases": (planning or {}).get("total_phases", len(phase_children)) if planning else len(phase_children),
+                "file_count": len(plan_files),
+                "children": plans_children,
             })
 
         # worktrees attached to this repo
