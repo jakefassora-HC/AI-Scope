@@ -218,3 +218,255 @@ renderInsights();
     apply(nowCollapsed);
   });
 })();
+
+// ── System Map (Phase 3) ──────────────────────────────────────────────────────
+
+// Tooltip element — created once, reused
+var _mapTooltip = (function() {
+  var el = document.createElement("div");
+  el.className = "map-tooltip";
+  document.body.appendChild(el);
+  return el;
+})();
+
+// Navigate to a named tab by clicking its button
+function activateTab(name) {
+  var btn = document.querySelector("[data-tab='" + name + "']");
+  if (btn) btn.click();
+}
+
+// Scroll the .file-row whose first-span title contains path (or basename) into view
+function highlightRowByPath(path) {
+  if (!path) return;
+  var base = path.replace(/^.*\//, "");
+  var rows = document.querySelectorAll(".file-row");
+  var found = null;
+  for (var i = 0; i < rows.length; i++) {
+    var span = rows[i].querySelector("span");
+    if (!span) continue;
+    var t = span.getAttribute("title") || "";
+    var txt = span.textContent || "";
+    if (t.indexOf(path) !== -1 || txt.indexOf(base) !== -1) {
+      found = rows[i];
+      break;
+    }
+  }
+  if (!found) return;
+  found.scrollIntoView({ behavior: "smooth", block: "center" });
+  found.classList.add("row-highlight");
+  setTimeout(function() { found.classList.remove("row-highlight"); }, 1500);
+}
+
+var mapLoaded = false;
+var _cy = null;
+
+function loadMap() {
+  if (typeof cytoscape === "undefined") {
+    setTimeout(loadMap, 100);
+    return;
+  }
+  // Register dagre layout extension (idempotent guard)
+  if (window.cytoscapeDagre && !window._dagreRegistered) {
+    cytoscape.use(window.cytoscapeDagre);
+    window._dagreRegistered = true;
+  }
+
+  fetch("/api/graph").then(function(r) { return r.json(); }).then(function(data) {
+    var canvas = document.getElementById("map-canvas");
+    if (!canvas) return;
+
+    // Empty state
+    if (!data.nodes || data.nodes.length <= 1) {
+      canvas.innerHTML =
+        "<p style='text-align:center;padding:40px;color:var(--muted)'>" +
+        "Map is empty. Create a project under <code>~/projects/</code> " +
+        "or add a CLAUDE.md to populate it.</p>";
+      return;
+    }
+
+    canvas.innerHTML = "";
+
+    // Build cytoscape elements
+    var elements = [];
+    data.nodes.forEach(function(n) {
+      var d = { id: n.id, label: n.label, type: n.type };
+      var fields = ["path", "severity", "has_process", "branch", "dirty", "size_bytes",
+                    "tokens_est", "age_days", "parent_repo_id", "attached_to_id", "cwd", "pid"];
+      fields.forEach(function(f) {
+        if (n[f] !== undefined && n[f] !== null) d[f] = n[f];
+      });
+      elements.push({ data: d });
+    });
+    data.edges.forEach(function(e) {
+      var cls = e.style || "";
+      elements.push({ data: { id: e.source + "->" + e.target, source: e.source, target: e.target }, classes: cls });
+    });
+
+    // Determine layout — prefer dagre, fall back to breadthfirst
+    var layout;
+    try {
+      // Test if dagre layout is registered
+      var testLayout = { name: "dagre" };
+      layout = { name: "dagre", rankDir: "TB", nodeSep: 50, rankSep: 70, padding: 20 };
+    } catch(e) {
+      layout = { name: "breadthfirst", directed: true, roots: ["home"], padding: 20 };
+    }
+
+    _cy = cytoscape({
+      container: canvas,
+      elements: elements,
+      style: [
+        { selector: "node", style: {
+            "label": "data(label)",
+            "color": "#e6edf3",
+            "background-color": "#21262d",
+            "border-color": "#30363d",
+            "border-width": 1,
+            "font-size": "11px",
+            "font-family": "ui-monospace, monospace",
+            "text-valign": "bottom",
+            "text-margin-y": 6,
+            "width": 28, "height": 28,
+            "shape": "round-rectangle"
+        }},
+        { selector: 'node[type="home"]', style: {
+            "background-color": "#58a6ff",
+            "border-color": "#58a6ff",
+            "width": 36, "height": 36,
+            "font-size": "13px",
+            "font-weight": "bold"
+        }},
+        { selector: 'node[type="config"]', style: {
+            "shape": "round-rectangle",
+            "background-color": "#161b22"
+        }},
+        { selector: 'node[type="repo"]', style: {
+            "shape": "round-rectangle",
+            "background-color": "#1f6feb33"
+        }},
+        { selector: 'node[type="worktree"]', style: {
+            "shape": "round-rectangle",
+            "background-color": "#21262d",
+            "border-style": "dashed"
+        }},
+        { selector: 'node[type="process"]', style: {
+            "shape": "ellipse",
+            "background-color": "#3fb950",
+            "border-color": "#3fb950"
+        }},
+        { selector: 'node[severity="HIGH"]', style: {
+            "border-color": "#f85149",
+            "border-width": 3
+        }},
+        { selector: 'node[severity="MED"]', style: {
+            "border-color": "#d29922",
+            "border-width": 3
+        }},
+        { selector: "node[?has_process]", style: {
+            "overlay-color": "#3fb950",
+            "overlay-padding": 4,
+            "overlay-opacity": 0.2
+        }},
+        { selector: "edge", style: {
+            "width": 1,
+            "line-color": "#30363d",
+            "target-arrow-color": "#30363d",
+            "target-arrow-shape": "triangle",
+            "curve-style": "bezier"
+        }},
+        { selector: "edge.dashed", style: { "line-style": "dashed" }},
+        { selector: "edge.process", style: {
+            "line-color": "#3fb950",
+            "target-arrow-color": "#3fb950",
+            "line-style": "dotted"
+        }}
+      ],
+      layout: layout
+    });
+
+    // If dagre layout failed silently (layout ran but looks bad), there's not much
+    // we can do at runtime — dagre extension self-registers on load so if cytoscape
+    // is defined and dagre CDN loaded, it should just work.
+
+    // Tooltip on hover
+    _cy.on("mouseover", "node", function(evt) {
+      var d = evt.target.data();
+      var lines = [];
+      if (d.type === "home") {
+        lines.push("Home directory");
+      } else if (d.type === "config") {
+        lines.push(d.path || "");
+        var parts = [];
+        if (d.size_bytes !== undefined) parts.push(fmtBytes(d.size_bytes));
+        if (d.tokens_est !== undefined) parts.push("~" + d.tokens_est + " tok");
+        if (d.age_days !== undefined) parts.push(d.age_days + "d old");
+        if (parts.length) lines.push(parts.join(" · "));
+      } else if (d.type === "repo") {
+        lines.push(d.path || "");
+        var summary = [];
+        if (d.branch) summary.push(d.branch);
+        if (d.dirty) summary.push(d.dirty + " dirty");
+        if (!d.dirty) summary.push("clean");
+        lines.push(summary.join(", "));
+      } else if (d.type === "worktree") {
+        lines.push((d.path || "") + " (" + (d.branch || "") + ") (worktree)");
+      } else if (d.type === "process") {
+        lines.push("PID " + d.pid + " · cwd: " + d.cwd);
+      } else {
+        lines.push(d.label || d.id);
+      }
+      _mapTooltip.innerHTML = lines.map(function(l) {
+        return "<div>" + l + "</div>";
+      }).join("");
+      _mapTooltip.style.display = "block";
+      var oe = evt.originalEvent;
+      _mapTooltip.style.left = (oe.pageX + 12) + "px";
+      _mapTooltip.style.top  = (oe.pageY + 12) + "px";
+    });
+
+    _cy.on("mousemove", "node", function(evt) {
+      var oe = evt.originalEvent;
+      _mapTooltip.style.left = (oe.pageX + 12) + "px";
+      _mapTooltip.style.top  = (oe.pageY + 12) + "px";
+    });
+
+    _cy.on("mouseout", "node", function() {
+      _mapTooltip.style.display = "none";
+    });
+
+    // Click → navigate to matching tab
+    _cy.on("tap", "node", function(evt) {
+      var d = evt.target.data();
+      if (d.type === "repo" || d.type === "worktree") {
+        activateTab("git");
+        setTimeout(function() { highlightRowByPath(d.path); }, 50);
+      } else if (d.type === "config") {
+        activateTab("context");
+        setTimeout(function() { highlightRowByPath(d.path); }, 50);
+      } else if (d.type === "process") {
+        activateTab("processes");
+      }
+    });
+
+  }).catch(function(err) {
+    var canvas = document.getElementById("map-canvas");
+    if (canvas) canvas.textContent = "Error loading map: " + err.message;
+  });
+}
+
+// Lazy-load map on first click
+document.querySelector("[data-tab='map']").addEventListener("click", function() {
+  if (!mapLoaded) { loadMap(); mapLoaded = true; }
+});
+
+// Refresh integration: reload map if it's the active tab
+var _origLoadAll2 = loadAll;
+loadAll = function() {
+  _origLoadAll2();
+  var mapPanel = document.getElementById("tab-map");
+  if (mapPanel && mapPanel.classList.contains("active")) {
+    mapLoaded = false;
+    loadMap();
+    mapLoaded = true;
+  }
+};

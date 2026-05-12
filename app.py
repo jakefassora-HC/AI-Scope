@@ -7,6 +7,7 @@ from scope.file_browser import list_dir
 from scope.process_scanner import find_claude_processes
 from scope.git_scanner import find_repos
 from scope.rules import evaluate_all
+from scope.graph_builder import build_graph
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 HOME = Path.home()
@@ -62,6 +63,31 @@ def api_insights():
         home_is_git_repo=home_is_repo,
     )
     return jsonify({"findings": findings, "home_is_git_repo": home_is_repo})
+
+
+@app.get("/api/graph")
+def api_graph():
+    claude_files = scan_claude_dir(HOME / ".claude")
+    project_md = find_claude_md_files(HOME / "projects")
+    repos = find_repos(HOME / "projects")
+    worktrees = find_repos(HOME / ".claude" / "worktrees")
+    processes = find_claude_processes()
+    home_is_repo = (HOME / ".git").is_dir()
+    findings = evaluate_all(
+        config_files=claude_files + project_md,
+        repos=repos,
+        worktrees=worktrees,
+        home_is_git_repo=home_is_repo,
+    )
+    return jsonify(build_graph(
+        claude_files=claude_files,
+        project_md=project_md,
+        repos=repos,
+        worktrees=worktrees,
+        processes=processes,
+        findings=findings,
+        home_path=str(HOME),
+    ))
 
 
 @app.get("/")
