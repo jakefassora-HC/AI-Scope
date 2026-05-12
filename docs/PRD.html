@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>scope — PRD v1.1</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2128;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --amber: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 48px 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.65;
+    min-height: 100vh;
+  }
+  .container { max-width: 880px; margin: 0 auto; }
+  .header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+  }
+  .header .title {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 36px;
+    color: var(--accent);
+    margin: 0 0 4px 0;
+    letter-spacing: -1px;
+  }
+  .header .subtitle { color: var(--muted); font-size: 14px; margin: 4px 0; }
+  .meta { display: flex; gap: 24px; margin-top: 16px; font-size: 13px; color: var(--muted); }
+  .meta strong { color: var(--text); font-weight: 500; }
+  h1 { color: var(--text); font-size: 24px; margin-top: 56px; padding-bottom: 8px; border-bottom: 1px solid var(--border); font-weight: 600; }
+  h2 { color: var(--text); font-size: 18px; margin-top: 32px; font-weight: 600; }
+  h3 { color: var(--text); font-size: 16px; margin-top: 24px; font-weight: 600; }
+  p, li { color: var(--text); }
+  ul, ol { padding-left: 24px; }
+  li { margin: 4px 0; }
+  code {
+    background: var(--panel); color: var(--accent); padding: 2px 6px; border-radius: 4px;
+    border: 1px solid var(--border); font-size: 13px; font-family: ui-monospace, monospace;
+  }
+  pre {
+    background: var(--panel); border: 1px solid var(--border); padding: 16px 20px;
+    overflow-x: auto; border-radius: 6px; font-size: 13px; line-height: 1.5;
+  }
+  pre code { background: transparent; border: none; padding: 0; color: var(--text); }
+  table {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; overflow: hidden; font-size: 14px;
+  }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; background: var(--panel-2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  tr:last-child td { border-bottom: none; }
+  td { color: var(--text); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; letter-spacing: 0.3px; }
+  .badge-draft { background: rgba(210, 153, 34, 0.15); color: var(--amber); border: 1px solid rgba(210, 153, 34, 0.3); }
+  .badge-good { background: rgba(63, 185, 80, 0.15); color: var(--green); border: 1px solid rgba(63, 185, 80, 0.3); }
+  .badge-bad { background: rgba(248, 81, 73, 0.15); color: var(--red); border: 1px solid rgba(248, 81, 73, 0.3); }
+  .badge-new { background: rgba(188, 140, 255, 0.15); color: var(--purple); border: 1px solid rgba(188, 140, 255, 0.3); }
+  .callout {
+    background: var(--panel); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent); padding: 14px 18px;
+    margin: 16px 0; border-radius: 4px;
+  }
+  .callout.warn { border-left-color: var(--amber); }
+  .callout.danger { border-left-color: var(--red); }
+  .callout.good { border-left-color: var(--green); }
+  .toc {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 16px 24px; margin: 24px 0 40px 0;
+  }
+  .toc strong { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .toc ol { padding-left: 20px; margin: 8px 0 0 0; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+  .footer { text-align: center; color: var(--muted); margin-top: 64px; font-size: 12px; }
+  .arch-diagram {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 20px; font-family: ui-monospace, monospace; font-size: 12px;
+    line-height: 1.5; white-space: pre; overflow-x: auto; margin: 16px 0;
+  }
+  .phase {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 16px 20px; margin: 12px 0;
+  }
+  .phase .phase-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .phase .phase-num { color: var(--accent); font-weight: 600; font-family: ui-monospace, monospace; font-size: 14px; }
+  .phase .phase-time { color: var(--muted); font-size: 12px; }
+  .phase ul { margin: 8px 0; }
+  .phase .verify { color: var(--green); font-size: 13px; margin-top: 8px; font-style: italic; }
+  .changelog {
+    background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--purple);
+    padding: 12px 18px; margin: 16px 0; border-radius: 4px; font-size: 13px;
+  }
+  .changelog strong { color: var(--purple); }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <h1 class="title">scope</h1>
+  <div class="subtitle">Product Requirements Document · v1.1</div>
+  <div class="meta">
+    <div><strong>Status:</strong> <span class="badge badge-draft">DRAFT</span></div>
+    <div><strong>Owner:</strong> Jake Fassora</div>
+    <div><strong>Date:</strong> 2026-05-12</div>
+  </div>
+</div>
+
+<div class="changelog">
+  <strong>Changes from v1.0 →</strong> Ollama integration deferred to v2. Replaced with deterministic rules engine. Added File Browser and Active Process detection to v1. New estimated effort: 7–10 hrs (was 8–12).
+</div>
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#users">Users & Use Cases</a></li>
+    <li><a href="#goals">Goals & Non-Goals</a></li>
+    <li><a href="#features">v1 Feature List</a></li>
+    <li><a href="#security">Security & Threat Model</a></li>
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#phases">Build Phases</a></li>
+    <li><a href="#inspiration">Inspiration & Attributions</a></li>
+    <li><a href="#questions">Open Questions</a></li>
+    <li><a href="#success">Success Criteria</a></li>
+  </ol>
+</div>
+
+<h1 id="overview">1. Overview</h1>
+
+<p><code>scope</code> is a <strong>read-only local browser app</strong> that visualizes two invisible things on your machine:</p>
+
+<ol>
+  <li><strong>What Claude has access to</strong> — every <code>CLAUDE.md</code>, every config file, every hook, every MCP server, every rule. Sized, labeled by load behavior, with token cost estimates per source.</li>
+  <li><strong>Your git portfolio state</strong> — every repo on your laptop and every active Claude Code worktree, with branch, ahead/behind, dirty status, and staleness flags.</li>
+</ol>
+
+<p>A built-in <strong>rules engine</strong> annotates findings in plain English: <em>"This CLAUDE.md is 18KB and auto-loaded — costs ~4,700 tokens every turn; consider archiving."</em></p>
+
+<div class="callout">
+  <strong>Why it exists:</strong> Config rot is invisible. You can't see what Claude is loading on every turn until something explodes (slow responses, high token bills, weird behavior tied to a CLAUDE.md you forgot existed). <code>scope</code> makes it visible so you catch problems early without burning tokens asking Claude.
+</div>
+
+<p><strong>Mental model:</strong> <em>Google Maps for what's on your machine that Claude reads.</em></p>
+
+<h1 id="users">2. Users & Use Cases</h1>
+
+<p><strong>Primary user:</strong> A Claude Code power user (non-developer or developer) who wants visibility into their AI tooling without learning to grep configs or interpret JSONL logs.</p>
+
+<table>
+<thead><tr><th>Situation</th><th>What scope shows</th></tr></thead>
+<tbody>
+<tr><td>"Claude keeps mentioning an old project I deleted"</td><td>Surfaces the rogue CLAUDE.md still in <code>~</code> or a parent directory</td></tr>
+<tr><td>"Why are my responses slow / token bills high?"</td><td>Token cost breakdown per config source per turn</td></tr>
+<tr><td>"Which agents are running in worktrees right now?"</td><td>List of active <code>~/.claude/worktrees/agent-*</code> with branch + age</td></tr>
+<tr><td>"Where is my Claude Code currently running?" <span class="badge badge-new">NEW v1</span></td><td>Shows active <code>claude</code> processes and their working directory</td></tr>
+<tr><td>"Which of my repos have unpushed work?"</td><td>Multi-repo dashboard with ahead/behind counts</td></tr>
+<tr><td>"Let me just see what's in this folder" <span class="badge badge-new">NEW v1</span></td><td>Click any folder under <code>~</code> (deny-list respected) and browse</td></tr>
+<tr><td>"Should I prune this CLAUDE.md?"</td><td>Rules engine surfaces "auto-loaded + stale + large" warnings</td></tr>
+</tbody>
+</table>
+
+<h1 id="goals">3. Goals & Non-Goals</h1>
+
+<h2>Goals (v1)</h2>
+<ul>
+  <li><strong>Read-only.</strong> Never modify any file the user owns.</li>
+  <li><strong>Local-only.</strong> No cloud, no API calls, no telemetry.</li>
+  <li><strong>No AI dependency.</strong> v1 ships without any LLM. Rules engine = deterministic + fast + no install friction.</li>
+  <li><strong>Approachable stack.</strong> Python + Flask + vanilla JS.</li>
+  <li><strong>Fast first paint.</strong> Scan completes in under 2 seconds on a normal SSD.</li>
+  <li><strong>Plain-English UI.</strong> Every number has a human explanation next to it. Every technical term has a tooltip.</li>
+</ul>
+
+<h2>Non-goals (v1) <span class="badge badge-bad">EXPLICITLY EXCLUDED</span></h2>
+<ul>
+  <li><strong>Ollama or any LLM integration</strong> (deferred to v2)</li>
+  <li>Editing or pruning files automatically</li>
+  <li>Reading session transcripts (<code>~/.claude/projects/&lt;...&gt;/*.jsonl</code>)</li>
+  <li>Reading <code>.credentials.json</code> or any auth tokens</li>
+  <li>GitHub API integration</li>
+  <li>Diff rendering or stash content viewing</li>
+  <li>A graph view (list/tree only in v1)</li>
+  <li>Real-time SSE streaming of session activity</li>
+  <li>Multi-user, sharing, or any kind of export</li>
+</ul>
+
+<h2>v2 parking lot</h2>
+<ul>
+  <li>Ollama integration for free-form "Analyze with AI" buttons</li>
+  <li>GitHub PR / CI status</li>
+  <li>Editable pruning workflow (with backup + diff preview)</li>
+  <li>Session transcript inspector (with mandatory redaction)</li>
+  <li>Graph visualization (CodeBoarding-style)</li>
+  <li>Multi-machine portfolio sync</li>
+</ul>
+
+<h1 id="features">4. v1 Feature List</h1>
+
+<h2>4.1 Claude Context section</h2>
+<ul>
+  <li><strong>Global:</strong> <code>~/.claude/CLAUDE.md</code>, <code>~/.claude/settings.json</code>, <code>~/.claude/rules/*.md</code>, <code>~/.claude/memory/</code></li>
+  <li><strong>Project-level:</strong> every <code>CLAUDE.md</code> found in <code>~/projects/*/</code></li>
+  <li><strong>Per file:</strong> size in bytes, estimated tokens, load behavior badge (<span class="badge badge-bad">AUTO</span> / <span class="badge badge-good">ON-DEMAND</span>), last modified date</li>
+  <li><strong>Summary widget:</strong> total tokens auto-loaded per turn, with context</li>
+</ul>
+
+<h2>4.2 File Browser <span class="badge badge-new">NEW</span></h2>
+<ul>
+  <li>Click any folder under <code>~</code> to walk its contents</li>
+  <li>Tree expansion: click a folder, see its immediate children</li>
+  <li>File click: opens a preview (first 500 chars, redacted)</li>
+  <li>Deny-list enforced — refuses to walk into excluded paths</li>
+  <li>Size + last-modified shown on every entry</li>
+  <li>Symlinks not followed</li>
+</ul>
+
+<h2>4.3 Active Claude Processes <span class="badge badge-new">NEW</span></h2>
+<ul>
+  <li>Detects running <code>claude</code> (Claude Code CLI) processes via <code>psutil</code></li>
+  <li>Shows each one's PID, working directory, and how long it's been running</li>
+  <li>Empty state: "No Claude processes running"</li>
+</ul>
+
+<h2>4.4 Git State section</h2>
+<p>Lists every git repo in <code>~/projects/*</code> and <code>~/.claude/worktrees/agent-*</code>. Per repo: path, branch, uncommitted file count, untracked file count, commits ahead/behind, stash count, worktree count, last commit date, staleness flag.</p>
+
+<div class="callout warn">
+  <strong>No file contents.</strong> Counts and metadata only.
+</div>
+
+<h2>4.5 Rules Engine (plain-English insights)</h2>
+<p>Deterministic rules surface common config-rot patterns:</p>
+<table>
+<thead><tr><th>Rule</th><th>Triggers when</th><th>Severity</th></tr></thead>
+<tbody>
+<tr><td><code>auto_loaded_and_large</code></td><td>File auto-loads + &gt; 8KB</td><td><span class="badge badge-bad">HIGH</span></td></tr>
+<tr><td><code>stale_auto_loaded</code></td><td>Auto-loads + not edited 30+ days</td><td><span class="badge badge-draft">MED</span></td></tr>
+<tr><td><code>home_is_git_repo</code></td><td><code>~/.git</code> exists</td><td><span class="badge badge-bad">HIGH</span></td></tr>
+<tr><td><code>orphaned_worktree</code></td><td>Worktree not touched in 14+ days</td><td><span class="badge badge-draft">MED</span></td></tr>
+<tr><td><code>dirty_unpushed_stale</code></td><td>Dirty + ahead + last commit &gt; 7 days</td><td><span class="badge badge-draft">MED</span></td></tr>
+<tr><td><code>duplicate_claude_md</code></td><td>Two CLAUDE.md with &gt;80% overlap</td><td><span class="badge badge-good">LOW</span></td></tr>
+</tbody>
+</table>
+
+<h2>4.6 UI</h2>
+<ul>
+  <li>Single browser page at <code>http://127.0.0.1:8765</code></li>
+  <li>Four tabs: <strong>Claude Context</strong> | <strong>File Browser</strong> | <strong>Processes</strong> | <strong>Git State</strong></li>
+  <li>Top-level <strong>Insights</strong> panel always visible (output of rules engine)</li>
+  <li>Manual refresh button</li>
+  <li>Dark theme by default</li>
+  <li>Plain-English captions on every number; tooltips on every technical term</li>
+</ul>
+
+<h1 id="security">5. Security & Threat Model</h1>
+
+<h2>5.1 Hard exclusion list <span class="badge badge-bad">BAKED INTO CODE</span></h2>
+<pre><code>~/.claude/projects/          # session transcripts — never
+~/.claude/.credentials.json  # auth tokens — never
+~/.ssh/
+~/.aws/
+~/.gnupg/
+~/.config/gh/
+**/.env*
+**/id_rsa*
+**/*.pem
+**/*.key
+**/*.p12</code></pre>
+
+<h2>5.2 Network surface</h2>
+<ul>
+  <li>Flask binds to <code>127.0.0.1</code> only.</li>
+  <li>All endpoints <code>GET</code>-only.</li>
+  <li>No CORS.</li>
+  <li><strong>No external HTTP calls at all in v1.</strong></li>
+</ul>
+
+<h2>5.3 Filesystem safety</h2>
+<ul>
+  <li><code>os.walk(followlinks=False)</code> everywhere.</li>
+  <li>Every resolved path validated to be under <code>~</code>.</li>
+  <li>File reads size-capped at 256KB per file.</li>
+</ul>
+
+<h2>5.4 Secret redaction (defense in depth)</h2>
+<p>Regex pass for <code>sk-...</code>, <code>ghp_...</code>, <code>AKIA...</code>, JWTs, <code>xoxb-...</code>, AWS keys, high-entropy hex. Matches → <code>[REDACTED]</code>.</p>
+
+<h2>5.5 Process detection privacy</h2>
+<ul>
+  <li><code>psutil</code> reads only <code>cmdline</code> and <code>cwd</code> of <code>claude</code> processes.</li>
+  <li>We never read memory or open files of other processes.</li>
+</ul>
+
+<h2>5.6 Logging</h2>
+<ul>
+  <li>Logs path + status code only.</li>
+  <li><strong>Never logs file contents.</strong></li>
+</ul>
+
+<h1 id="architecture">6. Architecture</h1>
+
+<h2>6.1 Stack</h2>
+<pre><code>Python 3.11+
+├── Flask 3.x              HTTP server, templating
+├── GitPython 3.x          git status scanning
+├── psutil 5.x             process detection
+├── tiktoken               Token estimation
+└── vanilla JS + CSS       Browser UI, no build step</code></pre>
+<p><strong>No LLM dependency.</strong></p>
+
+<h2>6.2 Component diagram</h2>
+<div class="arch-diagram">[Browser at 127.0.0.1:8765]
+         ↓ GET /
+[Flask app.py]
+         ↓
+[scope/ package]
+  ├─ config_scanner.py   → walks ~/.claude/ + finds CLAUDE.md files
+  ├─ git_scanner.py      → runs git status per repo
+  ├─ file_browser.py     → on-demand directory walker
+  ├─ process_scanner.py  → finds running claude processes
+  ├─ rules.py            → deterministic insight rules
+  ├─ token_estimator.py  → byte/char → rough token count
+  ├─ exclusions.py       → hard deny list
+  └─ redact.py           → regex secret masking
+         ↓
+[Filesystem: ~/.claude/, ~/projects/, ~/]</div>
+
+<h2>6.3 Project layout</h2>
+<pre><code>~/projects/scope/
+├── README.md
+├── PRD.md
+├── PLAN.md                   ← implementation plan
+├── docs/
+│   ├── PRD.html
+│   └── PLAN.html
+├── .gitignore
+├── requirements.txt
+├── app.py
+├── scope/
+│   ├── __init__.py
+│   ├── config_scanner.py
+│   ├── git_scanner.py
+│   ├── file_browser.py
+│   ├── process_scanner.py
+│   ├── rules.py
+│   ├── token_estimator.py
+│   ├── exclusions.py
+│   └── redact.py
+├── templates/
+│   └── index.html
+├── static/
+│   ├── style.css
+│   └── app.js
+└── tests/
+    ├── test_exclusions.py
+    ├── test_redact.py
+    └── test_rules.py</code></pre>
+
+<h1 id="phases">7. Build Phases</h1>
+
+<div class="phase">
+  <div class="phase-head"><span class="phase-num">Phase 0 — Scaffold</span><span class="phase-time">~30 min</span></div>
+  <ul>
+    <li>Directory layout, requirements.txt, .gitignore, README skeleton</li>
+    <li>app.py serves "scope is alive" at <code>/</code></li>
+    <li><code>git init</code> and first commit</li>
+  </ul>
+  <div class="verify">✓ <code>python app.py</code> → browser shows hello page</div>
+</div>
+
+<div class="phase">
+  <div class="phase-head"><span class="phase-num">Phase 1 — Config scanner + safety</span><span class="phase-time">1–2 hrs</span></div>
+  <ul>
+    <li><code>scope/exclusions.py</code> with unit tests (deny list)</li>
+    <li><code>scope/redact.py</code> with unit tests (secret masking)</li>
+    <li><code>scope/config_scanner.py</code>: walks <code>~/.claude/</code></li>
+    <li>Render list in index.html</li>
+  </ul>
+  <div class="verify">✓ Page shows every file under <code>~/.claude/</code>, deny list verified</div>
+</div>
+
+<div class="phase">
+  <div class="phase-head"><span class="phase-num">Phase 2 — CLAUDE.md hierarchy + token budget</span><span class="phase-time">~2 hrs</span></div>
+  <ul>
+    <li>Extend scanner to find every CLAUDE.md in <code>~/projects/*</code></li>
+    <li>Label AUTO / ON-DEMAND</li>
+    <li>"Per-turn token budget" widget</li>
+    <li>Plain-English captions throughout</li>
+  </ul>
+  <div class="verify">✓ Total auto-loaded tokens shown, worst offenders highlighted</div>
+</div>
+
+<div class="phase">
+  <div class="phase-head"><span class="phase-num">Phase 3 — File browser + process scanner</span><span class="phase-time">~1.5 hrs</span></div>
+  <ul>
+    <li><code>scope/file_browser.py</code>: on-demand directory walker</li>
+    <li><code>scope/process_scanner.py</code>: <code>psutil</code> for running claude processes</li>
+    <li>Two new tabs in the UI</li>
+  </ul>
+  <div class="verify">✓ Can click into folders + sees any running claude processes</div>
+</div>
+
+<div class="phase">
+  <div class="phase-head"><span class="phase-num">Phase 4 — Git portfolio scanner</span><span class="phase-time">2–3 hrs</span></div>
+  <ul>
+    <li><code>scope/git_scanner.py</code>: walks <code>~/projects/*</code> + <code>~/.claude/worktrees/*</code></li>
+    <li>Per-repo: branch, dirty, ahead/behind, stash, last commit, staleness</li>
+    <li>Git State tab</li>
+  </ul>
+  <div class="verify">✓ Every repo + worktree shown with accurate state</div>
+</div>
+
+<div class="phase">
+  <div class="phase-head"><span class="phase-num">Phase 5 — Rules engine + polish</span><span class="phase-time">~1.5 hrs</span></div>
+  <ul>
+    <li><code>scope/rules.py</code> with unit tests</li>
+    <li>Insights panel at top of UI</li>
+    <li>Manual refresh button, error handling, dark theme polish</li>
+    <li>Regenerate <code>docs/PRD.html</code> + <code>docs/PLAN.html</code></li>
+  </ul>
+  <div class="verify">✓ Full flow runs cleanly, real insights surfaced</div>
+</div>
+
+<div class="callout good">
+  <strong>Total estimated effort:</strong> 7–10 hours of focused work.
+</div>
+
+<h1 id="inspiration">8. Inspiration & Attributions</h1>
+<table>
+<thead><tr><th>Source</th><th>What we lift</th><th>License</th></tr></thead>
+<tbody>
+<tr><td><a href="https://github.com/phuryn/claude-usage" style="color: var(--accent);">phuryn/claude-usage</a></td><td><code>~/.claude/</code> scanning patterns, Flask scaffold</td><td>MIT</td></tr>
+<tr><td><a href="https://github.com/nosarthur/gita" style="color: var(--accent);">nosarthur/gita</a></td><td>Per-repo <code>git status</code> logic</td><td>MIT</td></tr>
+</tbody>
+</table>
+<p><em>CodeBoarding's Ollama wrapper deferred with Ollama itself to v2.</em></p>
+
+<h1 id="questions">9. Open Questions</h1>
+<table>
+<thead><tr><th>Question</th><th>Default if no decision</th></tr></thead>
+<tbody>
+<tr><td>Default port?</td><td><code>8765</code></td></tr>
+<tr><td>Scan <code>~/projects/archive/</code>?</td><td>No — exclude</td></tr>
+<tr><td>Worktree staleness threshold?</td><td>14 days</td></tr>
+<tr><td>CLAUDE.md staleness threshold?</td><td>30 days</td></tr>
+</tbody>
+</table>
+
+<h1 id="success">10. Success Criteria</h1>
+<ol>
+  <li>Opening <code>localhost:8765</code> shows every CLAUDE.md and config file under <code>~/.claude/</code> and <code>~/projects/</code>, with token cost per file in plain English.</li>
+  <li>Git State tab lists every repo + every worktree with accurate branch + dirty + ahead/behind data.</li>
+  <li>Processes tab shows any running <code>claude</code> Code processes (or "none running" cleanly).</li>
+  <li>File Browser walks any folder under <code>~</code> on demand, respecting the deny list.</li>
+  <li>The scanner refuses to enter <code>~/.claude/projects/</code>, <code>~/.ssh/</code>, etc. (unit-tested).</li>
+  <li>Insights panel surfaces at least one real, actionable finding on Jake's actual machine.</li>
+</ol>
+
+<hr>
+
+<div class="footer">
+  scope · PRD v1.1 · rendered from PRD.md · 2026-05-12
+</div>
+
+</div>
+</body>
+</html>
