@@ -332,7 +332,117 @@ function closePlanModal() {
   document.getElementById("plan-modal-bg").classList.remove("open");
 }
 document.getElementById("plan-modal-bg").addEventListener("click", closePlanModal);
-document.addEventListener("keydown", function(e){ if (e.key === "Escape") closePlanModal(); });
+document.addEventListener("keydown", function(e){
+  if (e.key === "Escape") { closePlanModal(); closePhaseModal(); }
+});
+
+// ── Phase detail modal (status + plan files + git commits) ───────────────────
+function closePhaseModal() {
+  document.getElementById("phase-modal-bg").classList.remove("open");
+}
+document.getElementById("phase-modal-bg").addEventListener("click", closePhaseModal);
+
+function _fmtRelTime(ts) {
+  if (!ts) return "—";
+  var s = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  if (s < 30 * 86400) return Math.floor(s / 86400) + "d ago";
+  return new Date(ts * 1000).toLocaleDateString();
+}
+
+function openPhase(phaseData, planChildren) {
+  // phaseData: the .data object from the d3 node (has name, status, repo, repo_name, etc.)
+  // planChildren: array of plan-file leaf data, sorted by name
+  var title = document.getElementById("phase-modal-title");
+  title.textContent = phaseData.name + "  ·  " + (phaseData.repo_name || "");
+  var body = document.getElementById("phase-modal-body");
+  var status = phaseData.status || "idle";
+
+  var stats = [];
+  if (phaseData.commit_count) stats.push("<span><strong>" + phaseData.commit_count + "</strong> commits in this phase</span>");
+  if (phaseData.referenced_in_commits) stats.push("<span><strong>" + phaseData.referenced_in_commits + "</strong> commits referencing this phase</span>");
+  if (phaseData.merged_to_main) stats.push("<span style='color:#3fb950'>● merged into main</span>");
+  if (phaseData.last_commit_at) stats.push("<span>last commit <strong>" + _fmtRelTime(phaseData.last_commit_at) + "</strong></span>");
+  if (!stats.length) stats.push("<span>no git activity yet</span>");
+
+  var planRows = (planChildren || []).filter(function(p){ return p.kind === "plan"; })
+    .map(function(p){
+      var sz = (p.size_bytes && p.size_bytes >= 1024)
+        ? (p.size_bytes / 1024).toFixed(1) + " KB" : (p.size_bytes || 0) + " B";
+      return '<div class="pp-row" data-path="' + encodeURIComponent(p.path) + '" data-name="' + _escapeHtml(p.name) + '">' +
+        '<span class="pp-name">' + _escapeHtml(p.name) + '</span>' +
+        (p.claude_active ? '<span class="pp-active">● editing</span>' : '<span class="pp-ext ' + (p.ext || 'md') + '">' + (p.ext || "md").toUpperCase() + '</span>') +
+        '<span class="pp-size">' + sz + '</span>' +
+        '</div>';
+    }).join("");
+
+  body.innerHTML =
+    '<div class="phase-section">' +
+      '<span class="phase-pill ' + status + '">' + status + '</span>' +
+      '<div class="phase-stats" style="margin-top:10px">' + stats.join("") + '</div>' +
+    '</div>' +
+    '<div class="phase-section">' +
+      '<div class="phase-section-title"><span>plan files</span><span>' + (planChildren || []).length + '</span></div>' +
+      (planRows ? '<div class="phase-plan-list">' + planRows + '</div>'
+                : '<div class="phase-commit-list"><div class="pc-empty">No plan files yet</div></div>') +
+    '</div>' +
+    '<div class="phase-section">' +
+      '<div class="phase-section-title"><span>commits</span><span id="phase-commit-count">loading…</span></div>' +
+      '<div id="phase-commit-list" class="phase-commit-list">' +
+        '<div class="pc-empty">Loading commits…</div>' +
+      '</div>' +
+    '</div>';
+
+  // Plan-row click → open the plan viewer
+  body.querySelectorAll(".pp-row").forEach(function(row){
+    row.addEventListener("click", function(){
+      openPlan(decodeURIComponent(row.dataset.path), row.dataset.name);
+    });
+  });
+
+  document.getElementById("phase-modal-bg").classList.add("open");
+
+  // Fetch commits
+  if (!phaseData.repo) {
+    document.getElementById("phase-commit-list").innerHTML =
+      '<div class="pc-empty">Unknown repo for this phase</div>';
+    document.getElementById("phase-commit-count").textContent = "—";
+    return;
+  }
+  fetch("/api/phase-commits?repo=" + encodeURIComponent(phaseData.repo) +
+        "&phase=" + encodeURIComponent(phaseData.name))
+    .then(function(r){ return r.json(); }).then(function(d){
+      var list = document.getElementById("phase-commit-list");
+      var count = document.getElementById("phase-commit-count");
+      if (d.error) {
+        list.innerHTML = '<div class="pc-empty">Error: ' + _escapeHtml(d.error) + '</div>';
+        count.textContent = "—";
+        return;
+      }
+      var commits = d.commits || [];
+      count.textContent = commits.length;
+      if (!commits.length) {
+        list.innerHTML = '<div class="pc-empty">No commits attributed to this phase</div>';
+        return;
+      }
+      list.innerHTML = commits.map(function(c){
+        var files = (c.files || []).slice(0, 4)
+          .map(function(f){ return '<span>' + _escapeHtml(f) + '</span>'; }).join("");
+        var more = c.files && c.files.length > 4 ? ' <span>+' + (c.files.length - 4) + '</span>' : "";
+        return '<div class="pc-row">' +
+          '<div class="pc-head"><span class="pc-sha">' + _escapeHtml(c.short) + '</span>' +
+            '<span class="pc-date">' + _fmtRelTime(c.ts) + ' · ' + _escapeHtml(c.author || "") + '</span></div>' +
+          '<div class="pc-subject">' + _escapeHtml(c.subject) + '</div>' +
+          (files ? '<div class="pc-files">' + files + more + '</div>' : '') +
+        '</div>';
+      }).join("");
+    }).catch(function(err){
+      document.getElementById("phase-commit-list").innerHTML =
+        '<div class="pc-empty">Failed to load commits: ' + _escapeHtml(err.message) + '</div>';
+    });
+}
 
 // ── Circle packing ──────────────────────────────────────────────────────────
 function renderCircles(data) {
@@ -387,6 +497,10 @@ function renderCircles(data) {
       event.stopPropagation();
       if (!d.children && d.data.kind === "plan" && d.data.path) {
         openPlan(d.data.path, d.data.rel || d.data.name); return;
+      }
+      if (d.data.kind === "phase") {
+        var children = (d.children || []).map(function(c){ return c.data; });
+        openPhase(d.data, children); return;
       }
       if (focus !== d) zoom(d);
     })
@@ -532,6 +646,11 @@ function renderSunburst(data) {
   function clicked(event, p) {
     if (!p.children && p.data.kind === "plan" && p.data.path) {
       openPlan(p.data.path, p.data.rel || p.data.name); return;
+    }
+    if (p.data.kind === "phase") {
+      if (event) event.stopPropagation();
+      var children = (p.children || []).map(function(c){ return c.data; });
+      openPhase(p.data, children); return;
     }
     if (event) event.stopPropagation();
     center.datum(p.parent || root);

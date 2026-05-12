@@ -13,6 +13,7 @@ from scope.plan_scanner import scan_planning, list_plan_files
 from scope.activity_scanner import scan_activity
 from scope.exclusions import is_excluded
 from scope.redact import redact
+from scope.commit_mapper import phase_commits
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 HOME = Path.home()
@@ -211,6 +212,50 @@ def api_plan():
             "path": str(p),
             "ext": p.suffix.lower().lstrip("."),
             "content": redact(content),
+        })
+    except (OSError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.get("/api/phase-commits")
+def api_phase_commits():
+    """Return commits attributed to a phase.
+
+    Query params:
+      repo:  absolute repo path (must be under HOME, must be a directory)
+      phase: phase name as it appears in .planning/phases/<name>/
+
+    Defense layers:
+      1. Both repo + phase must resolve under $HOME.
+      2. repo must NOT match the deny list.
+      3. Phase name is a simple identifier (no slashes, no .. traversal).
+    """
+    raw_repo = request.args.get("repo", "")
+    raw_phase = request.args.get("phase", "")
+    if not raw_repo or not raw_phase:
+        return jsonify({"error": "repo and phase required"}), 400
+    # Phase name must be a single path segment — no traversal possible
+    if "/" in raw_phase or ".." in raw_phase or raw_phase.startswith("."):
+        return jsonify({"error": "invalid phase name"}), 400
+    try:
+        repo_p = Path(raw_repo).resolve()
+        if HOME.resolve() not in repo_p.parents:
+            return jsonify({"error": "outside HOME"}), 403
+        if is_excluded(repo_p):
+            return jsonify({"error": "denied path"}), 403
+        if not repo_p.is_dir():
+            return jsonify({"error": "repo not found"}), 404
+        phase_dir = repo_p / ".planning" / "phases" / raw_phase
+        if not phase_dir.is_dir():
+            # Soft-fail: phase might not have a dir but still have commit refs
+            phase_dir_str = str(phase_dir)
+        else:
+            phase_dir_str = str(phase_dir.resolve())
+        commits = phase_commits(str(repo_p), phase_dir_str, raw_phase)
+        return jsonify({
+            "repo": str(repo_p),
+            "phase": raw_phase,
+            "commits": commits,
         })
     except (OSError, ValueError) as e:
         return jsonify({"error": str(e)}), 400

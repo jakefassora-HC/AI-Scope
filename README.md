@@ -38,6 +38,7 @@ Plus an **Insights** panel surfacing common config-rot patterns.
 - **v2 (Map tab, System visualization):** ✅ shipped — see [docs/PRD-v2.md](docs/PRD-v2.md)
 - **v2.5 (Plan documents + Circles/Sunburst + click-to-read modal):** ✅ shipped — see [docs/PRD-v2.5.md](docs/PRD-v2.5.md)
 - **v2.6 (1Hz activity probe + git-aware 3-status phases):** ✅ shipped — see [docs/PRD-v2.6.md](docs/PRD-v2.6.md)
+- **v2.7 (commit ↔ phase attribution + phase detail modal):** ✅ shipped — click any phase circle/arc to see its plan files and the commits attributed to it
 
 ## Security
 

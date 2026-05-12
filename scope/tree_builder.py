@@ -177,6 +177,8 @@ def build_tree(
                     "name": phase_name,
                     "kind": "phase",
                     "status": status,
+                    "repo": rpath,                        # for /api/phase-commits
+                    "repo_name": rpath.split("/")[-1],    # display label
                     "last_commit_at": meta.get("last_commit_at", 0),
                     "commit_count": meta.get("commit_count", 0),
                     "referenced_in_commits": meta.get("referenced_in_commits", 0),

@@ -131,6 +131,17 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
     </div>
   </div>
 
+  <!-- Phase detail modal (status + plans + commits) -->
+  <div id="phase-modal-bg" class="modal-bg">
+    <div class="modal phase-modal" onclick="event.stopPropagation()">
+      <div class="modal-head">
+        <span id="phase-modal-title" class="modal-title"></span>
+        <button class="modal-close" onclick="closePhaseModal()">×</button>
+      </div>
+      <div id="phase-modal-body" class="modal-body phase-body"></div>
+    </div>
+  </div>
+
   <script>window.HOME_PATH = "{{ home_path }}";</script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

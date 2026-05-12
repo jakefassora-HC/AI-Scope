@@ -205,6 +205,56 @@ code { background: var(--panel); padding: 2px 6px; border-radius: 4px;
 .modal-body { flex: 1; overflow: hidden; padding: 0; font-size: 14px; line-height: 1.6;
               display: flex; min-height: 0; }
 .modal-body iframe { flex: 1; }
+
+/* Phase detail modal — structured, not iframe-sandboxed */
+.phase-modal { width: min(820px, 92vw); height: min(76vh, 760px); }
+.modal-body.phase-body { display: block; padding: 20px 24px; overflow: auto; }
+
+.phase-section { margin-bottom: 22px; }
+.phase-section-title { font-size: 11px; color: var(--muted); text-transform: uppercase;
+                       letter-spacing: 0.5px; margin: 0 0 8px; display: flex; justify-content: space-between; }
+
+.phase-pill { display: inline-block; padding: 4px 12px; border-radius: 12px;
+              font: 600 11px ui-monospace, monospace; letter-spacing: 0.5px;
+              text-transform: uppercase; margin-right: 8px; }
+.phase-pill.done    { background: rgba(63,185,80,0.18);  color: #3fb950; border: 1px solid rgba(63,185,80,0.4); }
+.phase-pill.active  { background: rgba(88,166,255,0.18); color: #58a6ff; border: 1px solid rgba(88,166,255,0.4); }
+.phase-pill.idle    { background: rgba(210,153,34,0.18); color: #d29922; border: 1px solid rgba(210,153,34,0.4); }
+
+.phase-stats { display: flex; gap: 14px; flex-wrap: wrap; font: 11px ui-monospace, monospace;
+               color: var(--muted); }
+.phase-stats span strong { color: var(--text); }
+
+.phase-plan-list { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+                   overflow: hidden; }
+.phase-plan-list .pp-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px;
+                           padding: 8px 14px; border-bottom: 1px solid var(--border);
+                           cursor: pointer; font: 12px ui-monospace, monospace; align-items: center; }
+.phase-plan-list .pp-row:last-child { border-bottom: none; }
+.phase-plan-list .pp-row:hover { background: rgba(88,166,255,0.07); }
+.phase-plan-list .pp-name { color: var(--text); }
+.phase-plan-list .pp-name b { color: var(--accent); }
+.phase-plan-list .pp-ext { font-size: 9px; padding: 2px 6px; border-radius: 3px;
+                           background: var(--panel); color: var(--muted); }
+.phase-plan-list .pp-ext.md { color: #58a6ff; }
+.phase-plan-list .pp-ext.html { color: #ffa657; }
+.phase-plan-list .pp-size { color: var(--muted); font-size: 11px; }
+.phase-plan-list .pp-active { color: #ffa657; font-size: 10px; padding: 2px 6px;
+                              border: 1px solid rgba(255,166,87,0.4); border-radius: 3px; }
+
+.phase-commit-list { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+.phase-commit-list .pc-row { padding: 10px 14px; border-bottom: 1px solid var(--border);
+                             font: 12px ui-monospace, monospace; }
+.phase-commit-list .pc-row:last-child { border-bottom: none; }
+.phase-commit-list .pc-head { display: flex; justify-content: space-between;
+                              align-items: baseline; gap: 12px; }
+.phase-commit-list .pc-sha { color: var(--accent); font-weight: 600; }
+.phase-commit-list .pc-date { color: var(--muted); font-size: 11px; }
+.phase-commit-list .pc-subject { color: var(--text); margin: 4px 0 6px; }
+.phase-commit-list .pc-files { font-size: 10px; color: var(--muted); }
+.phase-commit-list .pc-files span { margin-right: 10px; }
+.phase-commit-list .pc-empty { padding: 18px 14px; color: var(--muted);
+                               font: 12px ui-monospace, monospace; text-align: center; }
 .modal-body h1 { font-size: 24px; margin-top: 0; color: var(--text); }
 .modal-body h2 { font-size: 18px; margin-top: 24px; color: var(--accent);
                  padding-bottom: 6px; border-bottom: 1px solid var(--border); }
