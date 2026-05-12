@@ -136,3 +136,39 @@ function loadAll() {
 
 document.getElementById("refresh").addEventListener("click", loadAll);
 loadAll();
+
+function renderRepos(container, repos) {
+  container.innerHTML = "";
+  if (!repos.length) { container.textContent = "(none)"; return; }
+  repos.sort(function(a, b) { return b.age_days - a.age_days; });
+  repos.forEach(function(r) {
+    var row = document.createElement("div");
+    row.className = "file-row";
+    var summary = [];
+    if (r.dirty) summary.push(r.dirty + " dirty");
+    if (r.untracked) summary.push(r.untracked + " untracked");
+    if (r.ahead) summary.push("↑" + r.ahead);
+    if (r.behind) summary.push("↓" + r.behind);
+    if (r.stash_count) summary.push(r.stash_count + " stash");
+    if (!summary.length) summary.push("clean");
+    var stalenessBadge = r.stale
+      ? "<span class=\"badge auto\">STALE</span>"
+      : "<span class=\"badge ondemand\">OK</span>";
+    row.innerHTML =
+      "<span title=\"" + r.path + "\">" + r.path.replace(/^.*\//, "") +
+        " <code>" + r.branch + "</code></span>" +
+      stalenessBadge +
+      "<span>" + summary.join(", ") + "</span>" +
+      "<span>" + r.age_days + "d ago</span>";
+    container.appendChild(row);
+  });
+}
+
+function loadGit() {
+  fetch("/api/git").then(function(r) { return r.json(); }).then(function(d) {
+    renderRepos(document.getElementById("git-projects"), d.projects);
+    renderRepos(document.getElementById("git-worktrees"), d.worktrees);
+  });
+}
+
+document.querySelector("[data-tab='git']").addEventListener("click", loadGit);

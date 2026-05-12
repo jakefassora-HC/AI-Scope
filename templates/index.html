@@ -43,7 +43,12 @@
     <div id="processes-list">Loading…</div>
   </section>
 
-  <section id="tab-git" class="tab-panel"><p>Git state (Phase 4).</p></section>
+  <section id="tab-git" class="tab-panel">
+    <h2>Projects (<code>~/projects/</code>)</h2>
+    <div id="git-projects">Loading…</div>
+    <h2>Active Worktrees (<code>~/.claude/worktrees/</code>)</h2>
+    <div id="git-worktrees">Loading…</div>
+  </section>
 
   <script>window.HOME_PATH = "{{ home_path }}";</script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
