@@ -11,6 +11,17 @@ from datetime import datetime
 from scope.exclusions import is_excluded
 from scope.token_estimator import estimate_tokens_from_bytes
 
+# Files Claude Code actually injects into every turn's context. Plugin
+# caches, session transcripts, tool-result blobs, and lockfiles live under
+# ~/.claude/ but never auto-load — flagging them as "loads every turn" was
+# false signal that drowned the real findings.
+AUTO_LOADED_ROOT_FILES: frozenset[str] = frozenset({
+    "CLAUDE.md",
+    "settings.json",
+    "settings.local.json",
+})
+AUTO_LOADED_SUBDIRS: frozenset[str] = frozenset({"rules"})
+
 
 def _describe(path: Path, auto_loaded: bool = True) -> dict:
     from datetime import timezone
@@ -28,21 +39,46 @@ def _describe(path: Path, auto_loaded: bool = True) -> dict:
 
 
 def scan_claude_dir(claude_dir: Path) -> list[dict]:
-    """Return one dict per file under `claude_dir`, respecting deny list."""
+    """Return dicts for files Claude Code auto-loads from `claude_dir`.
+
+    Scope is narrow on purpose: only top-level config + rules/*.md. The wider
+    `.claude/` tree (plugin caches, session transcripts, tool-results, etc.) is
+    NOT auto-loaded and is excluded so the insights panel stays honest.
+    """
     if not claude_dir.exists():
         return []
     results: list[dict] = []
-    for dirpath, dirnames, filenames in os.walk(claude_dir, followlinks=False):
-        # Skip excluded subtrees early
-        dirnames[:] = [d for d in dirnames if not is_excluded(Path(dirpath) / d)]
-        for fname in filenames:
-            p = Path(dirpath) / fname
+
+    for fname in AUTO_LOADED_ROOT_FILES:
+        p = claude_dir / fname
+        if not p.is_file() or is_excluded(p):
+            continue
+        try:
+            results.append(_describe(p))
+        except (OSError, PermissionError):
+            continue
+
+    for subdir_name in AUTO_LOADED_SUBDIRS:
+        subdir = claude_dir / subdir_name
+        if not subdir.is_dir() or is_excluded(subdir):
+            continue
+        try:
+            entries = list(os.scandir(subdir))
+        except (OSError, PermissionError):
+            continue
+        for entry in entries:
+            if not entry.is_file(follow_symlinks=False):
+                continue
+            if not entry.name.endswith(".md"):
+                continue
+            p = Path(entry.path)
             if is_excluded(p):
                 continue
             try:
                 results.append(_describe(p))
             except (OSError, PermissionError):
                 continue
+
     return results
 
 
