@@ -172,3 +172,30 @@ function loadGit() {
 }
 
 document.querySelector("[data-tab='git']").addEventListener("click", loadGit);
+
+function renderInsights() {
+  fetch("/api/insights").then(function(r) { return r.json(); }).then(function(d) {
+    var body = document.getElementById("insights-body");
+    if (!d.findings.length) {
+      body.innerHTML = "<p style='color:var(--green)'>✓ No issues found.</p>";
+      return;
+    }
+    body.innerHTML = "";
+    d.findings.forEach(function(f) {
+      var row = document.createElement("div");
+      row.className = "file-row";
+      var color = f.severity === "HIGH" ? "auto" : "ondemand";
+      row.innerHTML =
+        "<span>" + f.message + "</span>" +
+        "<span class=\"badge " + color + "\">" + f.severity + "</span>" +
+        "<span></span>" +
+        "<span>" + f.rule + "</span>";
+      body.appendChild(row);
+    });
+  });
+}
+
+// Re-run on initial load + on refresh
+var originalLoadAll = loadAll;
+loadAll = function() { originalLoadAll(); renderInsights(); };
+renderInsights();

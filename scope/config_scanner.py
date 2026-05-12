@@ -12,14 +12,18 @@ from scope.exclusions import is_excluded
 from scope.token_estimator import estimate_tokens_from_bytes
 
 
-def _describe(path: Path) -> dict:
+def _describe(path: Path, auto_loaded: bool = True) -> dict:
+    from datetime import timezone
     stat = path.stat()
+    mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
     return {
         "path": str(path),
         "name": path.name,
         "size_bytes": stat.st_size,
         "tokens_est": estimate_tokens_from_bytes(stat.st_size),
-        "modified_iso": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+        "modified_iso": mtime.isoformat(timespec="seconds"),
+        "age_days": (datetime.now(tz=timezone.utc) - mtime).days,
+        "auto_loaded": auto_loaded,
     }
 
 
