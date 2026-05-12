@@ -135,3 +135,27 @@ code { background: var(--panel); padding: 2px 6px; border-radius: 4px;
   background: var(--panel);
   position: relative;
 }
+
+.map-tooltip {
+  position: fixed;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+  pointer-events: none;
+  z-index: 1000;
+  max-width: 480px;
+  display: none;
+}
+
+.row-highlight {
+  animation: row-flash 1.5s ease-out;
+}
+
+@keyframes row-flash {
+  0%   { background-color: rgba(88, 166, 255, 0.4); }
+  100% { background-color: transparent; }
+}
