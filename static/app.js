@@ -265,10 +265,10 @@ function loadMap() {
     setTimeout(loadMap, 100);
     return;
   }
-  // Register dagre layout extension (idempotent guard)
-  if (window.cytoscapeDagre && !window._dagreRegistered) {
-    cytoscape.use(window.cytoscapeDagre);
-    window._dagreRegistered = true;
+  // Register fcose layout extension (idempotent guard)
+  if (window.cytoscapeFcose && !window._fcoseRegistered) {
+    cytoscape.use(window.cytoscapeFcose);
+    window._fcoseRegistered = true;
   }
 
   fetch("/api/graph").then(function(r) { return r.json(); }).then(function(data) {
@@ -302,15 +302,21 @@ function loadMap() {
       elements.push({ data: { id: e.source + "->" + e.target, source: e.source, target: e.target }, classes: cls });
     });
 
-    // Determine layout — prefer dagre, fall back to breadthfirst
-    var layout;
-    try {
-      // Test if dagre layout is registered
-      var testLayout = { name: "dagre" };
-      layout = { name: "dagre", rankDir: "TB", nodeSep: 50, rankSep: 70, padding: 20 };
-    } catch(e) {
-      layout = { name: "breadthfirst", directed: true, roots: ["home"], padding: 20 };
-    }
+    var layout = {
+      name: "fcose",
+      quality: "proof",
+      animate: false,
+      randomize: false,
+      fit: true,
+      padding: 30,
+      nodeSeparation: 80,
+      idealEdgeLength: 80,
+      nodeRepulsion: 8000,
+      gravity: 0.25,
+      tile: true,
+      tilingPaddingVertical: 10,
+      tilingPaddingHorizontal: 10
+    };
 
     _cy = cytoscape({
       container: canvas,
@@ -383,10 +389,6 @@ function loadMap() {
       ],
       layout: layout
     });
-
-    // If dagre layout failed silently (layout ran but looks bad), there's not much
-    // we can do at runtime — dagre extension self-registers on load so if cytoscape
-    // is defined and dagre CDN loaded, it should just work.
 
     // Tooltip on hover
     _cy.on("mouseover", "node", function(evt) {
