@@ -9,9 +9,14 @@ from scope.git_scanner import find_repos
 from scope.rules import evaluate_all
 from scope.tree_builder import build_tree
 from scope.plan_scanner import scan_planning, list_plan_files
+from scope.activity_scanner import scan_activity
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 HOME = Path.home()
+
+# Cached set of plan file paths from the last /api/treemap response.
+# /api/activity stats these to detect recent edits without rescanning.
+_KNOWN_PLAN_PATHS: list[str] = []
 
 
 def _list_landmarks(repo_path: str) -> list[dict]:
@@ -106,7 +111,7 @@ def api_treemap():
         worktrees=worktrees,
         home_is_git_repo=home_is_repo,
     )
-    return jsonify(build_tree(
+    tree = build_tree(
         claude_files=claude_files,
         project_md=project_md,
         repos=repos,
@@ -117,7 +122,29 @@ def api_treemap():
         list_landmarks=_list_landmarks,
         scan_planning=scan_planning,
         list_plan_files=list_plan_files,
-    ))
+    )
+    # Cache plan paths for fast /api/activity probes
+    global _KNOWN_PLAN_PATHS
+    _KNOWN_PLAN_PATHS = _collect_plan_paths(tree)
+    return jsonify(tree)
+
+
+def _collect_plan_paths(node, out=None):
+    if out is None:
+        out = []
+    if isinstance(node, dict):
+        if node.get("kind") == "plan" and node.get("path"):
+            out.append(node["path"])
+        for c in node.get("children", []) or []:
+            _collect_plan_paths(c, out)
+    return out
+
+
+@app.get("/api/activity")
+def api_activity():
+    """Fast activity probe — poll at 1Hz. Returns claude processes +
+    recently-modified plan files (mtime within last 60s)."""
+    return jsonify(scan_activity(_KNOWN_PLAN_PATHS))
 
 
 @app.get("/api/plan")

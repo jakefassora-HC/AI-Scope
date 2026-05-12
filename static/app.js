@@ -510,8 +510,10 @@ function _renderMap() {
   else renderCircles(_mapData);
 }
 
-var _mapAutoRefreshId = null;
-var _MAP_REFRESH_MS = 10000;
+var _mapTreeRefreshId = null;
+var _mapActivityRefreshId = null;
+var _MAP_TREE_REFRESH_MS = 30000;
+var _MAP_ACTIVITY_REFRESH_MS = 1000;
 
 function loadMap(silent) {
   if (typeof d3 === "undefined") { setTimeout(loadMap, 100); return; }
@@ -521,25 +523,104 @@ function loadMap(silent) {
     var changed = !_mapData || JSON.stringify(data) !== JSON.stringify(_mapData);
     _mapData = data;
     if (changed) _renderMap();
-    _updateRefreshIndicator();
+    _updateRefreshIndicator("tree");
   }).catch(function(err){
     if (!silent) canvas.textContent = "Error loading map: " + err.message;
   });
 }
 
-function _updateRefreshIndicator() {
+function _updateRefreshIndicator(kind) {
   var el = document.getElementById("map-refresh-indicator");
   if (!el) return;
-  el.textContent = "↻ " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  var now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  if (kind === "tree") {
+    el.dataset.lastTree = now;
+  }
+  var act = el.dataset.lastActivity || "—";
+  var tree = el.dataset.lastTree || now;
+  el.textContent = "● " + act + " · ↻ " + tree;
+}
+
+function _mapTabActive() {
+  return document.getElementById("tab-map").classList.contains("active") && !document.hidden;
+}
+
+// ── Activity overlay: 1Hz poll, mutates existing SVG attrs only ─────────────
+function _applyActivityOverlay(activity) {
+  if (!activity) return;
+  var openSet = {};
+  (activity.processes || []).forEach(function(p){
+    (p.open_plans || []).forEach(function(path){ openSet[path] = true; });
+  });
+  var recentSet = {};
+  (activity.recent_mtimes || []).forEach(function(r){ recentSet[r.path] = r.mtime; });
+
+  // Mutate the cached _mapData in place so subsequent re-renders preserve state
+  function walk(node) {
+    if (!node) return;
+    if (node.kind === "plan" && node.path) {
+      node.claude_active = !!openSet[node.path];
+      node.recently_modified = !!recentSet[node.path];
+    }
+    if (node.children) node.children.forEach(walk);
+  }
+  if (_mapData) walk(_mapData);
+
+  // Direct SVG attribute updates (no layout pass, zoom state preserved)
+  // Circle packing nodes
+  d3.selectAll(".cp-node").each(function(d) {
+    if (!d || d.data.kind !== "plan") return;
+    var active = !!openSet[d.data.path];
+    var recent = !!recentSet[d.data.path];
+    d.data.claude_active = active;
+    d.data.recently_modified = recent;
+    var sel = d3.select(this).select("circle");
+    if (active) {
+      sel.attr("stroke", "#ffa657").attr("stroke-width", 2)
+        .style("filter", "drop-shadow(0 0 8px #ffa657)")
+        .attr("fill", "#ffa657");
+    } else if (recent) {
+      sel.attr("stroke", "#58a6ff").attr("stroke-width", 1.5)
+        .style("filter", "drop-shadow(0 0 4px #58a6ff)");
+    } else {
+      sel.attr("stroke", null).attr("stroke-width", 0).style("filter", null);
+    }
+  });
+
+  // Sunburst arcs
+  d3.selectAll(".sb-arc").each(function(d){
+    if (!d || d.data.kind !== "plan") return;
+    var active = !!openSet[d.data.path];
+    d.data.claude_active = active;
+    if (active) {
+      d3.select(this).attr("fill", "#ffa657");
+    }
+  });
+
+  // Update activity indicator
+  var el = document.getElementById("map-refresh-indicator");
+  if (el) {
+    el.dataset.lastActivity = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    _updateRefreshIndicator();
+  }
+}
+
+function _pollActivity() {
+  if (!_mapTabActive()) return;
+  fetch("/api/activity").then(function(r){ return r.json(); }).then(_applyActivityOverlay)
+    .catch(function(){ /* silent */ });
 }
 
 function _startMapAutoRefresh() {
-  if (_mapAutoRefreshId) return;
-  _mapAutoRefreshId = setInterval(function(){
-    if (document.getElementById("tab-map").classList.contains("active") && !document.hidden) {
-      loadMap(true);
-    }
-  }, _MAP_REFRESH_MS);
+  if (!_mapTreeRefreshId) {
+    _mapTreeRefreshId = setInterval(function(){
+      if (_mapTabActive()) loadMap(true);
+    }, _MAP_TREE_REFRESH_MS);
+  }
+  if (!_mapActivityRefreshId) {
+    _mapActivityRefreshId = setInterval(_pollActivity, _MAP_ACTIVITY_REFRESH_MS);
+  }
+  _pollActivity();  // fire one immediately so the user sees activity right away
 }
 
 // ── Plan search ─────────────────────────────────────────────────────────────

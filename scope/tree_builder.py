@@ -148,15 +148,21 @@ def build_tree(
         plan_files = list_plan_files(rpath)
         planning = scan_planning(rpath)
         if plan_files or (planning and planning.get("phases")):
-            phase_status_by_name: dict[str, str] = {}
+            phase_meta_by_name: dict[str, dict] = {}
             if planning and planning.get("phases"):
-                phase_status_by_name = {p["name"]: p.get("status", "draft") for p in planning["phases"]}
+                for p in planning["phases"]:
+                    phase_meta_by_name[p["name"]] = p
+            phase_status_by_name = {n: m.get("status", "idle") for n, m in phase_meta_by_name.items()}
 
             # bucket plan files: loose vs by phase
             loose_files: list[dict] = []
             by_phase: dict[str, list[dict]] = {}
             for pf in plan_files:
                 active = pf["path"] in open_plan_paths
+                # Override the legacy phase_status with the git-aware status
+                # from scan_planning so leaf colors match phase colors.
+                if pf.get("phase") and pf["phase"] in phase_status_by_name:
+                    pf = dict(pf, phase_status=phase_status_by_name[pf["phase"]])
                 leaf = _plan_file_leaf(pf, sev.get(pf["path"]), claude_active=active)
                 if pf.get("phase"):
                     by_phase.setdefault(pf["phase"], []).append(leaf)
@@ -165,11 +171,16 @@ def build_tree(
 
             phase_children: list[dict] = []
             for phase_name in sorted(set(list(by_phase.keys()) + list(phase_status_by_name.keys()))):
-                status = phase_status_by_name.get(phase_name, "draft")
+                status = phase_status_by_name.get(phase_name, "idle")
+                meta = phase_meta_by_name.get(phase_name, {})
                 phase_children.append({
                     "name": phase_name,
                     "kind": "phase",
                     "status": status,
+                    "last_commit_at": meta.get("last_commit_at", 0),
+                    "commit_count": meta.get("commit_count", 0),
+                    "referenced_in_commits": meta.get("referenced_in_commits", 0),
+                    "merged_to_main": meta.get("merged_to_main", False),
                     "children": by_phase.get(phase_name, [{
                         "name": "(no files)", "kind": "placeholder", "value": 1,
                     }]),

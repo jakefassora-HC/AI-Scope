@@ -105,7 +105,7 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
         <button class="map-view-btn" data-view="sunburst">◐ Sunburst</button>
       </div>
       <input id="map-search" type="search" class="map-search" placeholder="search plans…" autocomplete="off">
-      <span id="map-refresh-indicator" class="map-refresh-indicator" title="last refresh — auto-refreshes every 10s"></span>
+      <span id="map-refresh-indicator" class="map-refresh-indicator" title="● = last activity probe (1s) · ↻ = last tree scan (30s)"></span>
       <div class="map-legend">
         <span><i class="dot dot-complete"></i> complete</span>
         <span><i class="dot dot-iterating"></i> iterating</span>
@@ -118,7 +118,7 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
     </div>
     <div id="map-canvas" class="map-canvas">Click Map tab to load…</div>
     <div id="map-search-results" class="map-search-results" hidden></div>
-    <p class="map-hint">Click a circle/arc to zoom in · click background or center to zoom out · click any plan file to read it · search box filters all plan files · view auto-refreshes every 10s</p>
+    <p class="map-hint">Click a circle/arc to zoom in · click background or center to zoom out · click any plan file to read it · activity probe runs every 1s · full tree rescans every 30s</p>
   </section>
 
   <!-- Plan viewer modal -->
