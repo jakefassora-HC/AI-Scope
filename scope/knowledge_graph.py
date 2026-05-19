@@ -24,14 +24,24 @@ class KnowledgeGraph:
         neo4j_password: str = _DEFAULT_PASS,
     ) -> None:
         self._store = store
-        self._graphiti = Graphiti(neo4j_uri, neo4j_user, neo4j_password)
+        self._neo4j_uri = neo4j_uri
+        self._neo4j_user = neo4j_user
+        self._neo4j_password = neo4j_password
+        self._graphiti: Graphiti | None = None
+
+    def _get_graphiti(self) -> Graphiti:
+        """Lazy-init Graphiti so the app can start without OPENAI_API_KEY."""
+        if self._graphiti is None:
+            self._graphiti = Graphiti(self._neo4j_uri, self._neo4j_user, self._neo4j_password)
+        return self._graphiti
 
     async def sync(self) -> int:
         """Push unprocessed raw episodes to Graphiti. Returns count added."""
+        graphiti = self._get_graphiti()
         episodes = self._store.list_raw_episodes()
         count = 0
         for ep in episodes:
-            await self._graphiti.add_episode(
+            await graphiti.add_episode(
                 name=f"{ep['source']}:{ep['source_id']}",
                 episode_body=ep["content"],
                 source=EpisodeType.text,
@@ -75,4 +85,5 @@ class KnowledgeGraph:
         return {"nodes": nodes, "links": links}
 
     def close(self) -> None:
-        self._graphiti.close()
+        if self._graphiti is not None:
+            self._graphiti.close()

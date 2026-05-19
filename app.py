@@ -14,6 +14,11 @@ from scope.activity_scanner import scan_activity
 from scope.exclusions import is_excluded
 from scope.redact import redact
 from scope.commit_mapper import phase_commits
+from scope.knowledge_store import KnowledgeStore
+from scope.knowledge_graph import KnowledgeGraph
+
+_knowledge_store = KnowledgeStore()
+_knowledge_graph = KnowledgeGraph(_knowledge_store)
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 HOME = Path.home()
@@ -269,6 +274,67 @@ def root():
 @app.get("/prototype")
 def prototype():
     return render_template("prototype.html", home_path=str(HOME))
+
+
+@app.post("/api/knowledge/ingest")
+def api_knowledge_ingest():
+    """Accept structured knowledge from n8n ingestion flows.
+
+    Expected body (JSON):
+    {
+      "source": "slack" | "miro" | "confluence" | "granola",
+      "episodes": [{"id": "...", "content": "...", "metadata": {...}}],
+      "entities": [{"id": "...", "type": "...", "name": "...", "metadata": {...}}],
+      "relationships": [{"source_id": "...", "target_id": "...", "relation": "...", "metadata": {}}]
+    }
+    """
+    body = request.get_json(silent=True)
+    if not body or "source" not in body:
+        abort(400)
+
+    source = body["source"]
+
+    for ep in body.get("episodes", []):
+        _knowledge_store.add_raw_episode(
+            source=source,
+            source_id=ep["id"],
+            content=ep["content"],
+            metadata=ep.get("metadata", {}),
+        )
+
+    for ent in body.get("entities", []):
+        _knowledge_store.upsert_entity(
+            id=ent["id"],
+            type=ent["type"],
+            name=ent["name"],
+            metadata=ent.get("metadata", {}),
+        )
+
+    for rel in body.get("relationships", []):
+        _knowledge_store.add_relationship(
+            source_id=rel["source_id"],
+            target_id=rel["target_id"],
+            relation=rel["relation"],
+            metadata=rel.get("metadata", {}),
+        )
+
+    return jsonify({"ok": True, "source": source})
+
+
+@app.get("/api/knowledge-graph")
+def api_knowledge_graph_view():
+    """Return D3 force graph payload: {nodes, links}."""
+    return jsonify(_knowledge_graph.to_d3())
+
+
+@app.post("/api/knowledge/sync")
+def api_knowledge_sync():
+    """Trigger a Graphiti sync of all pending episodes."""
+    try:
+        count = _knowledge_graph.sync_blocking()
+        return jsonify({"ok": True, "count": count})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 if __name__ == "__main__":
