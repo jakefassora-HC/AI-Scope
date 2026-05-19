@@ -4,3 +4,5 @@ psutil==5.9.8
 tiktoken==0.7.0
 pytest==8.2.0
 pytest-cov==5.0.0
+graphiti==0.1.13
+neo4j==5.20.0
