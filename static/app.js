@@ -931,3 +931,122 @@ loadAll = function(){
     mapLoaded = true;
   }
 };
+
+// ── Knowledge Graph tab ─────────────────────────────────────────────────────
+
+var NODE_COLOR = {
+  person:  '#4f86f7',
+  project: '#f77f4f',
+  channel: '#4fc98a',
+  tool:    '#c94fc9',
+};
+
+function loadKnowledge() {
+  var status = document.getElementById('knowledge-status');
+  status.textContent = 'Loading…';
+  fetch('/api/knowledge-graph')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      status.textContent = data.nodes.length + ' nodes · ' + data.links.length + ' links';
+      renderKnowledgeGraph(data);
+    })
+    .catch(function() { status.textContent = 'Failed to load'; });
+}
+
+function renderKnowledgeGraph(graphData) {
+  var nodes = graphData.nodes;
+  var links = graphData.links;
+  var svg = d3.select('#knowledge-svg');
+  svg.selectAll('*').remove();
+
+  var container = document.getElementById('knowledge-canvas');
+  var W = container.clientWidth;
+  var H = container.clientHeight;
+
+  svg.attr('viewBox', '0 0 ' + W + ' ' + H);
+
+  var g = svg.append('g');
+
+  // Zoom + pan
+  svg.call(
+    d3.zoom().scaleExtent([0.2, 4]).on('zoom', function(e) { g.attr('transform', e.transform); })
+  );
+
+  var simulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(function(d) { return d.id; }).distance(120))
+    .force('charge', d3.forceManyBody().strength(-300))
+    .force('center', d3.forceCenter(W / 2, H / 2))
+    .force('collision', d3.forceCollide(30));
+
+  // Edges
+  var link = g.append('g').selectAll('.k-link')
+    .data(links).join('g').attr('class', 'k-link');
+
+  link.append('line');
+
+  link.append('text')
+    .attr('text-anchor', 'middle')
+    .text(function(d) { return d.relation; });
+
+  // Nodes
+  var node = g.append('g').selectAll('.k-node')
+    .data(nodes).join('g').attr('class', 'k-node')
+    .call(
+      d3.drag()
+        .on('start', function(e, d) { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+        .on('drag',  function(e, d) { d.fx = e.x; d.fy = e.y; })
+        .on('end',   function(e, d) { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
+    )
+    .on('click', function(e, d) { showKnowledgeDetail(d); });
+
+  node.append('circle')
+    .attr('r', function(d) { return d.type === 'project' ? 18 : 13; })
+    .attr('fill', function(d) { return NODE_COLOR[d.type] || '#aaa'; });
+
+  node.append('text')
+    .attr('dy', function(d) { return (d.type === 'project' ? 18 : 13) + 12; })
+    .attr('text-anchor', 'middle')
+    .text(function(d) { return d.name.length > 18 ? d.name.slice(0, 16) + '…' : d.name; });
+
+  simulation.on('tick', function() {
+    link.select('line')
+      .attr('x1', function(d) { return d.source.x; }).attr('y1', function(d) { return d.source.y; })
+      .attr('x2', function(d) { return d.target.x; }).attr('y2', function(d) { return d.target.y; });
+    link.select('text')
+      .attr('x', function(d) { return (d.source.x + d.target.x) / 2; })
+      .attr('y', function(d) { return (d.source.y + d.target.y) / 2; });
+    node.attr('transform', function(d) { return 'translate(' + d.x + ',' + d.y + ')'; });
+  });
+}
+
+function showKnowledgeDetail(node) {
+  var panel = document.getElementById('knowledge-detail');
+  var body = document.getElementById('knowledge-detail-body');
+  panel.classList.remove('hidden');
+  var meta = node.metadata || {};
+  var metaRows = Object.keys(meta).map(function(k) {
+    return '<div><b>' + k + ':</b> ' + meta[k] + '</div>';
+  }).join('');
+  body.innerHTML =
+    '<strong>' + node.name + '</strong><br>' +
+    '<span style="color:var(--muted);font-size:11px">' + node.type + '</span><br><br>' +
+    metaRows;
+}
+
+document.getElementById('knowledge-detail-close') &&
+  document.getElementById('knowledge-detail-close').addEventListener('click', function() {
+    document.getElementById('knowledge-detail').classList.add('hidden');
+  });
+
+document.getElementById('knowledge-sync-btn') &&
+  document.getElementById('knowledge-sync-btn').addEventListener('click', function() {
+    var status = document.getElementById('knowledge-status');
+    status.textContent = 'Syncing…';
+    fetch('/api/knowledge/sync', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(d) { status.textContent = 'Synced ' + d.count + ' episodes'; loadKnowledge(); })
+      .catch(function() { status.textContent = 'Sync failed'; });
+  });
+
+document.querySelector("[data-tab='knowledge']") &&
+  document.querySelector("[data-tab='knowledge']").addEventListener('click', loadKnowledge);
