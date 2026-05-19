@@ -69,6 +69,7 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
     <button class="tab" data-tab="processes">Processes</button>
     <button class="tab" data-tab="git">Git State</button>
     <button class="tab" data-tab="map">Map</button>
+    <button class="tab" data-tab="knowledge">Knowledge</button>
   </nav>
 
   <section id="tab-context" class="tab-panel active">
@@ -118,6 +119,27 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
     <div id="map-canvas" class="map-canvas">Click Map tab to load…</div>
     <div id="map-search-results" class="map-search-results" hidden></div>
     <p class="map-hint">Click a circle/arc to zoom in · click background or center to zoom out · click any plan file to read it · activity probe runs every 1s · full tree rescans every 30s</p>
+  </section>
+
+  <section id="tab-knowledge" class="tab-panel">
+    <div class="knowledge-toolbar">
+      <span class="knowledge-title">Knowledge Graph</span>
+      <button id="knowledge-sync-btn" class="btn-small">Sync Graph</button>
+      <span id="knowledge-status" class="knowledge-status"></span>
+    </div>
+    <div class="knowledge-legend">
+      <span class="legend-dot person">person</span>
+      <span class="legend-dot project">project</span>
+      <span class="legend-dot channel">channel</span>
+      <span class="legend-dot tool">tool</span>
+    </div>
+    <div id="knowledge-canvas" class="knowledge-canvas">
+      <svg id="knowledge-svg" width="100%" height="100%"></svg>
+    </div>
+    <div id="knowledge-detail" class="knowledge-detail hidden">
+      <button id="knowledge-detail-close">✕</button>
+      <div id="knowledge-detail-body"></div>
+    </div>
   </section>
 
   <!-- Plan viewer modal -->
