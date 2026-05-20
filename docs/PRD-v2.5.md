@@ -1,6 +1,7 @@
 # scope v2.5 PRD — "Read it" release
 
 **Status:** ✅ Shipped · 2026-05-12 · PR #6 (`feat/v2.5-region-map`)
+**Successor:** [v2.6 PRD](PRD-v2.6.md) — 1Hz activity probe + git-aware phase status
 **Predecessor:** [v2 PRD](PRD-v2.md) (System Map)
 **Theme:** Make the Map *useful*. Surface the actual planning documents, and let users read them without leaving the page.
 

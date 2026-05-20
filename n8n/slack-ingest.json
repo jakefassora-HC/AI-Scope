@@ -1,0 +1,133 @@
+{
+  "name": "Scope — Slack Knowledge Ingest",
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "meta": { "instanceId": "" },
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "parameters": {
+        "rule": { "interval": [{ "field": "minutes", "minutesInterval": 15 }] }
+      }
+    },
+    {
+      "id": "fetch-messages",
+      "name": "Fetch Slack Messages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "https://slack.com/api/conversations.history",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{$credentials.slackBotToken}}" }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "channel", "value": "REPLACE_WITH_CHANNEL_ID" },
+            { "name": "limit", "value": "50" },
+            {
+              "name": "oldest",
+              "value": "={{ String(Math.floor((Date.now() - 15 * 60 * 1000) / 1000)) }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "REPLACE_WITH_CRED_ID", "name": "Slack Bot Token" }
+      }
+    },
+    {
+      "id": "prepare-content",
+      "name": "Prepare Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0],
+      "parameters": {
+        "jsCode": "const messages = $input.item.json.messages ?? [];\nif (messages.length === 0) return [];\n\nconst episodes = messages.map(m => ({\n  id: `slack-${m.ts}`,\n  content: m.text || '',\n  metadata: { user: m.user ?? '', ts: m.ts, channel: 'REPLACE_WITH_CHANNEL_ID' }\n})).filter(e => e.content.trim().length > 0);\n\nconst combined = messages\n  .map(m => `[${m.user ?? 'user'}]: ${m.text ?? ''}`)\n  .join('\\n');\n\nreturn [{ json: { episodes, combined } }];"
+      }
+    },
+    {
+      "id": "extract-entities",
+      "name": "Extract Entities (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{$env.ANTHROPIC_API_KEY}}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "model": "claude-haiku-4-5-20251001",
+          "max_tokens": 1024,
+          "messages": [
+            {
+              "role": "user",
+              "content": "=Extract people, projects, tools, and channels mentioned in these Slack messages. Return ONLY valid JSON — no markdown, no explanation.\n\nFormat:\n{\"entities\":[{\"id\":\"unique-slug\",\"type\":\"person|project|channel|tool\",\"name\":\"Display Name\",\"metadata\":{}}],\"relationships\":[{\"source_id\":\"id1\",\"target_id\":\"id2\",\"relation\":\"VERB_PHRASE\",\"metadata\":{}}]}\n\nMessages:\n{{$json.combined}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "parse-response",
+      "name": "Parse Claude Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0],
+      "parameters": {
+        "jsCode": "const text = $input.item.json.content?.[0]?.text ?? '{}';\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch {\n  parsed = { entities: [], relationships: [] };\n}\n\nconst episodes = $('Prepare Content').item.json.episodes ?? [];\n\nreturn [{\n  json: {\n    source: 'slack',\n    episodes,\n    entities: parsed.entities ?? [],\n    relationships: parsed.relationships ?? []\n  }\n}];"
+      }
+    },
+    {
+      "id": "ingest",
+      "name": "POST to Scope Ingest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8765/api/knowledge/ingest",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify($json) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule": {
+      "main": [[{ "node": "Fetch Slack Messages", "type": "main", "index": 0 }]]
+    },
+    "Fetch Slack Messages": {
+      "main": [[{ "node": "Prepare Content", "type": "main", "index": 0 }]]
+    },
+    "Prepare Content": {
+      "main": [[{ "node": "Extract Entities (Claude)", "type": "main", "index": 0 }]]
+    },
+    "Extract Entities (Claude)": {
+      "main": [[{ "node": "Parse Claude Response", "type": "main", "index": 0 }]]
+    },
+    "Parse Claude Response": {
+      "main": [[{ "node": "POST to Scope Ingest", "type": "main", "index": 0 }]]
+    }
+  }
+}

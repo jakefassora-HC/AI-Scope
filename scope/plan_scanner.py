@@ -5,17 +5,23 @@ Surfaces:
   * the actual plan documents — markdown and html — that live inside
     planning-like folders (.planning, plans, planning, docs) or at repo root
     (CLAUDE.md, README.md, ROADMAP.md, etc).
+  * git-derived phase signals (last_commit_at, commit_count, referenced_in_commits,
+    merged_to_main) that drive the 3-status taxonomy (done / active / idle).
 
-Pure I/O over filesystem; no network. Tolerant of missing files.
+Pure I/O over filesystem + git subprocess; no network. Tolerant of missing files.
 """
 from __future__ import annotations
 import re
+import time
 from datetime import datetime, timezone
 from os import scandir
 from pathlib import Path
 from typing import Optional
 
 from scope.token_estimator import estimate_tokens_from_bytes
+from scope.git_phase_scanner import phase_git_signals_batch
+
+ACTIVE_WINDOW_DAYS = 7  # a phase with a commit in the last week counts as active
 
 PLAN_EXTS = (".md", ".html", ".htm")
 PLANNING_DIRS = (".planning", "plans", "planning", "docs", ".gsd")
@@ -76,25 +82,57 @@ def _coerce(v: str):
         return v
 
 
-def _phase_status(phase_dir: Path) -> str:
-    """Classify a phase directory.
-
-    - 'complete': has a *-VERIFICATION.md file
-    - 'iterating': has any *-PLAN.md but no VERIFICATION
-    - 'planning': has DISCUSS.md or RESEARCH.md only
-    - 'draft': else
-    """
+def _phase_file_signals(phase_dir: Path) -> dict:
+    """Extract file-presence signals from a phase directory."""
     try:
         names = [e.name for e in scandir(phase_dir) if e.is_file(follow_symlinks=False)]
     except (OSError, PermissionError):
-        return "draft"
-    if any(n.endswith("-VERIFICATION.md") or n == "VERIFICATION.md" for n in names):
-        return "complete"
-    if any(n.endswith("-PLAN.md") or n == "PLAN.md" for n in names):
-        return "iterating"
-    if any(n in ("DISCUSS.md", "RESEARCH.md") for n in names):
-        return "planning"
-    return "draft"
+        names = []
+    return {
+        "has_verification": any(n.endswith("-VERIFICATION.md") or n == "VERIFICATION.md" for n in names),
+        "has_plan": any(n.endswith("-PLAN.md") or n == "PLAN.md" for n in names),
+        "has_research": any(n in ("DISCUSS.md", "RESEARCH.md", "DISCUSSION-LOG.md") for n in names),
+        "any_files": bool(names),
+    }
+
+
+def _derive_status(file_sig: dict, git_sig: dict, claude_active: bool = False) -> str:
+    """Derive the 3-status taxonomy from file + git signals.
+
+    Returns one of: 'done' | 'active' | 'idle'.
+
+    Rules (KISS — 3 buckets):
+      - done:   VERIFICATION.md exists AND (commit_count >= 1 OR referenced_in_commits >= 1
+                                            OR merged_to_main)
+      - active: claude is currently editing a file in this phase
+                OR commits in the last ACTIVE_WINDOW_DAYS
+      - idle:   everything else (planning docs only / drafted but never shipped / abandoned)
+    """
+    if file_sig.get("has_verification") and (
+        git_sig.get("commit_count", 0) >= 1
+        or git_sig.get("referenced_in_commits", 0) >= 1
+        or git_sig.get("merged_to_main", False)
+    ):
+        return "done"
+
+    if claude_active:
+        return "active"
+    last_at = git_sig.get("last_commit_at", 0)
+    if last_at and (time.time() - last_at) < ACTIVE_WINDOW_DAYS * 86400:
+        return "active"
+
+    return "idle"
+
+
+# Legacy alias — some callers still expect a single-string status from filesystem
+# alone (e.g. plan-file enrichment in tree_builder before git data is joined).
+def _phase_status(phase_dir: Path) -> str:
+    sig = _phase_file_signals(phase_dir)
+    if sig["has_verification"]:
+        return "done"        # provisional — upgraded by _derive_status when git seen
+    if sig["has_plan"] or sig["has_research"]:
+        return "idle"
+    return "idle"
 
 
 def scan_planning(repo_path: str) -> Optional[dict]:
@@ -134,16 +172,32 @@ def scan_planning(repo_path: str) -> Optional[dict]:
             )
         except (OSError, PermissionError):
             entries = []
-        for entry in entries:
+        # Build phase records with file signals first; git signals fetched in batch.
+        raw = [{
+            "name": e.name,
+            "path": e.path,
+            "_file_sig": _phase_file_signals(Path(e.path)),
+        } for e in entries]
+        # Parallel batched git scan for this repo
+        git_sigs = phase_git_signals_batch(
+            repo_path,
+            [{"name": p["name"], "path": p["path"]} for p in raw],
+        )
+        for p, gs in zip(raw, git_sigs):
+            status = _derive_status(p["_file_sig"], gs)
             phases.append({
-                "name": entry.name,
-                "status": _phase_status(Path(entry.path)),
-                "path": entry.path,
+                "name": p["name"],
+                "path": p["path"],
+                "status": status,
+                "last_commit_at": gs["last_commit_at"],
+                "commit_count": gs["commit_count"],
+                "referenced_in_commits": gs["referenced_in_commits"],
+                "merged_to_main": gs["merged_to_main"],
             })
 
     total = progress.get("total_phases") if isinstance(progress.get("total_phases"), int) else len(phases)
     completed = progress.get("completed_phases") if isinstance(progress.get("completed_phases"), int) else sum(
-        1 for p in phases if p["status"] == "complete"
+        1 for p in phases if p["status"] == "done"
     )
     percent = progress.get("percent") if isinstance(progress.get("percent"), int) else (
         int(round(100 * completed / total)) if total else 0

@@ -237,7 +237,15 @@ var mapLoaded = false;
 var _mapData = null;
 var _mapView = "circles";
 
-var STATUS_COLOR = { complete: "#3fb950", iterating: "#58a6ff", planning: "#8957e5", draft: "#7d8590" };
+// 3-status taxonomy (KISS): done / active / idle
+// done   = green  (handled, no action needed)
+// active = blue   (claude working OR recent commits)
+// idle   = amber  (needs your attention — drafted but not shipped)
+var STATUS_COLOR = { done: "#3fb950", active: "#58a6ff", idle: "#d29922" };
+// claude is currently editing a file → orange glow on top of status color
+var ACTIVE_EDIT_COLOR = "#ffa657";
+// HIGH severity overlay
+var HIGH_COLOR = "#f85149";
 var KIND_COLOR = {
   root: "#0d1117", region: "#1c2230", repo: "#2d6cdf", worktree: "#1f6feb",
   group: "#3b3654", plan: "#7d8590", phase: "#3fb950", process: "#2ea043",
@@ -252,25 +260,189 @@ function _showTip(html, e) {
 }
 function _hideTip() { _mapTooltip.style.display = "none"; }
 
-// Plan viewer modal
+// Plan viewer modal — renders content inside a sandboxed iframe (sandbox=""
+// disallows scripts, popups, navigation, top-window access). Markdown is
+// converted to HTML on the parent page first, then loaded as srcdoc. This
+// neutralizes any <script>/<iframe>/onclick payload a plan file may contain.
+function _escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function(c){
+    return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[c];
+  });
+}
+function _modalDoc(bodyHtml) {
+  // Inline the same styles the modal uses so the sandboxed doc looks identical.
+  return [
+    "<!doctype html><html><head><meta charset='utf-8'><base target='_blank'>",
+    "<style>",
+    "body{font:14px/1.6 -apple-system,system-ui,sans-serif;color:#e6edf3;",
+    "background:#161b22;margin:0;padding:20px 28px;}",
+    "h1{font-size:24px;margin-top:0}",
+    "h2{font-size:18px;margin-top:24px;color:#58a6ff;padding-bottom:6px;border-bottom:1px solid #30363d}",
+    "h3{font-size:15px;margin-top:18px}",
+    "code{background:#0d1117;padding:2px 6px;font-family:ui-monospace,monospace}",
+    "pre{background:#0d1117;padding:12px 14px;border-radius:6px;overflow-x:auto;",
+    "border:1px solid #30363d;margin:10px 0}",
+    "pre code{background:transparent;padding:0}",
+    "table{border-collapse:collapse;margin:10px 0}",
+    "th,td{border:1px solid #30363d;padding:6px 10px}",
+    "th{background:#0d1117}",
+    "blockquote{border-left:3px solid #58a6ff;margin:10px 0;padding:6px 16px;",
+    "color:#7d8590;background:rgba(88,166,255,0.05)}",
+    "ul,ol{padding-left:24px}a{color:#58a6ff}img{max-width:100%}",
+    "hr{border:none;border-top:1px solid #30363d;margin:20px 0}",
+    "</style></head><body>",
+    bodyHtml,
+    "</body></html>"
+  ].join("");
+}
+
 function openPlan(path, name) {
   var titleEl = document.getElementById("plan-modal-title");
   var bodyEl = document.getElementById("plan-modal-body");
   titleEl.textContent = name || path;
-  bodyEl.innerHTML = "<p style='color:var(--muted)'>Loading…</p>";
+  bodyEl.innerHTML = "<p style='color:var(--muted);padding:18px'>Loading…</p>";
   document.getElementById("plan-modal-bg").classList.add("open");
   fetch("/api/plan?path=" + encodeURIComponent(path)).then(function(r){return r.json();}).then(function(d){
-    if (d.error) { bodyEl.innerHTML = "<p style='color:var(--red)'>" + d.error + "</p>"; return; }
-    if (d.ext === "md" && typeof marked !== "undefined") bodyEl.innerHTML = marked.parse(d.content);
-    else if (d.ext === "html" || d.ext === "htm") bodyEl.innerHTML = d.content;
-    else bodyEl.innerHTML = "<pre>" + d.content.replace(/</g, "&lt;") + "</pre>";
+    if (d.error) {
+      bodyEl.innerHTML = "<p style='color:var(--red);padding:18px'>" + _escapeHtml(d.error) + "</p>";
+      return;
+    }
+    var inner;
+    if (d.ext === "md" && typeof marked !== "undefined") {
+      inner = marked.parse(d.content);
+    } else if (d.ext === "html" || d.ext === "htm") {
+      inner = d.content; // raw — sandboxed iframe will defang it
+    } else {
+      inner = "<pre>" + _escapeHtml(d.content) + "</pre>";
+    }
+    // sandbox="" means: no scripts, no forms, no popups, no top-nav. Origin
+    // becomes a unique null origin so even if the page tries `fetch('/api/plan')`,
+    // the call is cross-origin and the response is not readable.
+    var iframe = document.createElement("iframe");
+    iframe.setAttribute("sandbox", "");
+    iframe.style.cssText = "width:100%;height:100%;border:0;background:#161b22;display:block";
+    iframe.srcdoc = _modalDoc(inner);
+    bodyEl.innerHTML = "";
+    bodyEl.appendChild(iframe);
+  }).catch(function(err){
+    bodyEl.innerHTML = "<p style='color:var(--red);padding:18px'>Failed to load: " + _escapeHtml(err.message) + "</p>";
   });
 }
 function closePlanModal() {
   document.getElementById("plan-modal-bg").classList.remove("open");
 }
 document.getElementById("plan-modal-bg").addEventListener("click", closePlanModal);
-document.addEventListener("keydown", function(e){ if (e.key === "Escape") closePlanModal(); });
+document.addEventListener("keydown", function(e){
+  if (e.key === "Escape") { closePlanModal(); closePhaseModal(); }
+});
+
+// ── Phase detail modal (status + plan files + git commits) ───────────────────
+function closePhaseModal() {
+  document.getElementById("phase-modal-bg").classList.remove("open");
+}
+document.getElementById("phase-modal-bg").addEventListener("click", closePhaseModal);
+
+function _fmtRelTime(ts) {
+  if (!ts) return "—";
+  var s = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  if (s < 30 * 86400) return Math.floor(s / 86400) + "d ago";
+  return new Date(ts * 1000).toLocaleDateString();
+}
+
+function openPhase(phaseData, planChildren) {
+  // phaseData: the .data object from the d3 node (has name, status, repo, repo_name, etc.)
+  // planChildren: array of plan-file leaf data, sorted by name
+  var title = document.getElementById("phase-modal-title");
+  title.textContent = phaseData.name + "  ·  " + (phaseData.repo_name || "");
+  var body = document.getElementById("phase-modal-body");
+  var status = phaseData.status || "idle";
+
+  var stats = [];
+  if (phaseData.commit_count) stats.push("<span><strong>" + phaseData.commit_count + "</strong> commits in this phase</span>");
+  if (phaseData.referenced_in_commits) stats.push("<span><strong>" + phaseData.referenced_in_commits + "</strong> commits referencing this phase</span>");
+  if (phaseData.merged_to_main) stats.push("<span style='color:#3fb950'>● merged into main</span>");
+  if (phaseData.last_commit_at) stats.push("<span>last commit <strong>" + _fmtRelTime(phaseData.last_commit_at) + "</strong></span>");
+  if (!stats.length) stats.push("<span>no git activity yet</span>");
+
+  var planRows = (planChildren || []).filter(function(p){ return p.kind === "plan"; })
+    .map(function(p){
+      var sz = (p.size_bytes && p.size_bytes >= 1024)
+        ? (p.size_bytes / 1024).toFixed(1) + " KB" : (p.size_bytes || 0) + " B";
+      return '<div class="pp-row" data-path="' + encodeURIComponent(p.path) + '" data-name="' + _escapeHtml(p.name) + '">' +
+        '<span class="pp-name">' + _escapeHtml(p.name) + '</span>' +
+        (p.claude_active ? '<span class="pp-active">● editing</span>' : '<span class="pp-ext ' + (p.ext || 'md') + '">' + (p.ext || "md").toUpperCase() + '</span>') +
+        '<span class="pp-size">' + sz + '</span>' +
+        '</div>';
+    }).join("");
+
+  body.innerHTML =
+    '<div class="phase-section">' +
+      '<span class="phase-pill ' + status + '">' + status + '</span>' +
+      '<div class="phase-stats" style="margin-top:10px">' + stats.join("") + '</div>' +
+    '</div>' +
+    '<div class="phase-section">' +
+      '<div class="phase-section-title"><span>plan files</span><span>' + (planChildren || []).length + '</span></div>' +
+      (planRows ? '<div class="phase-plan-list">' + planRows + '</div>'
+                : '<div class="phase-commit-list"><div class="pc-empty">No plan files yet</div></div>') +
+    '</div>' +
+    '<div class="phase-section">' +
+      '<div class="phase-section-title"><span>commits</span><span id="phase-commit-count">loading…</span></div>' +
+      '<div id="phase-commit-list" class="phase-commit-list">' +
+        '<div class="pc-empty">Loading commits…</div>' +
+      '</div>' +
+    '</div>';
+
+  // Plan-row click → open the plan viewer
+  body.querySelectorAll(".pp-row").forEach(function(row){
+    row.addEventListener("click", function(){
+      openPlan(decodeURIComponent(row.dataset.path), row.dataset.name);
+    });
+  });
+
+  document.getElementById("phase-modal-bg").classList.add("open");
+
+  // Fetch commits
+  if (!phaseData.repo) {
+    document.getElementById("phase-commit-list").innerHTML =
+      '<div class="pc-empty">Unknown repo for this phase</div>';
+    document.getElementById("phase-commit-count").textContent = "—";
+    return;
+  }
+  fetch("/api/phase-commits?repo=" + encodeURIComponent(phaseData.repo) +
+        "&phase=" + encodeURIComponent(phaseData.name))
+    .then(function(r){ return r.json(); }).then(function(d){
+      var list = document.getElementById("phase-commit-list");
+      var count = document.getElementById("phase-commit-count");
+      if (d.error) {
+        list.innerHTML = '<div class="pc-empty">Error: ' + _escapeHtml(d.error) + '</div>';
+        count.textContent = "—";
+        return;
+      }
+      var commits = d.commits || [];
+      count.textContent = commits.length;
+      if (!commits.length) {
+        list.innerHTML = '<div class="pc-empty">No commits attributed to this phase</div>';
+        return;
+      }
+      list.innerHTML = commits.map(function(c){
+        var files = (c.files || []).slice(0, 4)
+          .map(function(f){ return '<span>' + _escapeHtml(f) + '</span>'; }).join("");
+        var more = c.files && c.files.length > 4 ? ' <span>+' + (c.files.length - 4) + '</span>' : "";
+        return '<div class="pc-row">' +
+          '<div class="pc-head"><span class="pc-sha">' + _escapeHtml(c.short) + '</span>' +
+            '<span class="pc-date">' + _fmtRelTime(c.ts) + ' · ' + _escapeHtml(c.author || "") + '</span></div>' +
+          '<div class="pc-subject">' + _escapeHtml(c.subject) + '</div>' +
+          (files ? '<div class="pc-files">' + files + more + '</div>' : '') +
+        '</div>';
+      }).join("");
+    }).catch(function(err){
+      document.getElementById("phase-commit-list").innerHTML =
+        '<div class="pc-empty">Failed to load commits: ' + _escapeHtml(err.message) + '</div>';
+    });
+}
 
 // ── Circle packing ──────────────────────────────────────────────────────────
 function renderCircles(data) {
@@ -300,26 +472,41 @@ function renderCircles(data) {
   node.append("circle")
     .attr("fill", function(d){
       var k = d.data.kind;
-      if (k === "phase") return STATUS_COLOR[d.data.status] || "#7d8590";
+      if (k === "plan" && d.data.claude_active) return ACTIVE_EDIT_COLOR;
+      if (k === "phase") return STATUS_COLOR[d.data.status] || STATUS_COLOR.idle;
       if (k === "plan") {
-        var s = d.data.phase_status; if (s) return STATUS_COLOR[s] || "#7d8590";
-        return d.data.ext === "html" ? "#ffa657" : "#58a6ff";
+        var s = d.data.phase_status; if (s) return STATUS_COLOR[s] || STATUS_COLOR.idle;
+        return d.data.ext === "html" ? ACTIVE_EDIT_COLOR : STATUS_COLOR.active;
       }
       if (d.data.has_process) return "#2ea043";
-      if (d.data.severity === "HIGH") return "#f85149";
-      if (d.data.dirty) return "#d29922";
+      if (d.data.severity === "HIGH") return HIGH_COLOR;
+      if (d.data.dirty) return STATUS_COLOR.idle;
       return KIND_COLOR[k] || "#21262d";
     })
-    .attr("fill-opacity", function(d){ return d.children ? 0.35 : 0.85; })
+    .attr("stroke", function(d){ return d.data.claude_active ? ACTIVE_EDIT_COLOR : null; })
+    .attr("stroke-width", function(d){ return d.data.claude_active ? 2 : 0; })
+    .style("filter", function(d){ return d.data.claude_active ? "drop-shadow(0 0 6px " + ACTIVE_EDIT_COLOR + ")" : null; })
+    .attr("fill-opacity", function(d){
+      // Branches: a touch translucent so children read; leaves: full strength
+      if (!d.children) return 0.92;
+      // idle phases stay fully visible (we want them to grab attention)
+      if (d.data.kind === "phase" && d.data.status === "idle") return 0.75;
+      return d.data.kind === "phase" ? 0.7 : 0.55;
+    })
     .on("click", function(event, d){
       event.stopPropagation();
       if (!d.children && d.data.kind === "plan" && d.data.path) {
         openPlan(d.data.path, d.data.rel || d.data.name); return;
       }
+      if (d.data.kind === "phase") {
+        var children = (d.children || []).map(function(c){ return c.data; });
+        openPhase(d.data, children); return;
+      }
       if (focus !== d) zoom(d);
     })
     .on("mouseover", function(e, d){
       var parts = ["<b>" + d.data.name + "</b> · " + (d.data.kind || "")];
+      if (d.data.claude_active) parts.push("<span style='color:#ffa657'>● claude editing</span>");
       if (d.data.status) parts.push(d.data.status);
       if (d.data.phase_status) parts.push(d.data.phase_status);
       if (d.data.branch) parts.push("branch: " + d.data.branch);
@@ -408,7 +595,12 @@ function renderSunburst(data) {
     .join("path")
     .attr("class", "sb-arc")
     .attr("fill", arcColor)
-    .attr("fill-opacity", function(d){ return arcVisible(d.current) ? (d.children ? 0.6 : 0.88) : 0; })
+    .attr("fill-opacity", function(d){
+      if (!arcVisible(d.current)) return 0;
+      if (!d.children) return 0.95;                       // leaves: vibrant
+      if (d.data.kind === "phase") return 0.85;           // phases: prominent so status reads at a glance
+      return 0.65;                                         // other branches (regions/repos/groups)
+    })
     .attr("pointer-events", function(d){ return arcVisible(d.current) ? "auto" : "none"; })
     .attr("d", function(d){ return arc(d.current); })
     .on("click", clicked)
@@ -442,15 +634,23 @@ function renderSunburst(data) {
     .style("pointer-events", "none").text("scope");
 
   function arcColor(d) {
-    if (d.data.kind === "phase") return STATUS_COLOR[d.data.status] || "#7d8590";
-    if (d.data.kind === "plan") return STATUS_COLOR[d.data.phase_status || "draft"];
+    if (d.data.kind === "plan" && d.data.claude_active) return ACTIVE_EDIT_COLOR;
+    if (d.data.kind === "phase") return STATUS_COLOR[d.data.status] || STATUS_COLOR.idle;
+    if (d.data.kind === "plan") return STATUS_COLOR[d.data.phase_status || "idle"];
     if (d.data.has_process) return "#2ea043";
+    if (d.data.severity === "HIGH") return HIGH_COLOR;
+    if (d.data.dirty) return STATUS_COLOR.idle;
     return KIND_COLOR[d.data.kind] || "#3a3f4b";
   }
 
   function clicked(event, p) {
     if (!p.children && p.data.kind === "plan" && p.data.path) {
       openPlan(p.data.path, p.data.rel || p.data.name); return;
+    }
+    if (p.data.kind === "phase") {
+      if (event) event.stopPropagation();
+      var children = (p.children || []).map(function(c){ return c.data; });
+      openPhase(p.data, children); return;
     }
     if (event) event.stopPropagation();
     center.datum(p.parent || root);
@@ -468,7 +668,12 @@ function renderSunburst(data) {
     path.transition(tr)
       .tween("data", function(d){ var i = d3.interpolate(d.current, d.target); return function(t){ d.current = i(t); }; })
       .filter(function(d){ return +this.getAttribute("fill-opacity") || arcVisible(d.target); })
-      .attr("fill-opacity", function(d){ return arcVisible(d.target) ? (d.children ? 0.6 : 0.88) : 0; })
+      .attr("fill-opacity", function(d){
+        if (!arcVisible(d.target)) return 0;
+        if (!d.children) return 0.95;
+        if (d.data.kind === "phase") return 0.85;
+        return 0.65;
+      })
       .attr("pointer-events", function(d){ return arcVisible(d.target) ? "auto" : "none"; })
       .attrTween("d", function(d){ return function(){ return arc(d.current); }; });
     label.transition(tr)
@@ -504,15 +709,176 @@ function _renderMap() {
   else renderCircles(_mapData);
 }
 
-function loadMap() {
+var _mapTreeRefreshId = null;
+var _mapActivityRefreshId = null;
+var _MAP_TREE_REFRESH_MS = 30000;
+var _MAP_ACTIVITY_REFRESH_MS = 1000;
+
+function loadMap(silent) {
   if (typeof d3 === "undefined") { setTimeout(loadMap, 100); return; }
   var canvas = document.getElementById("map-canvas");
-  canvas.textContent = "Loading…";
+  if (!silent) canvas.textContent = "Loading…";
   fetch("/api/treemap").then(function(r){ return r.json(); }).then(function(data){
+    var changed = !_mapData || JSON.stringify(data) !== JSON.stringify(_mapData);
     _mapData = data;
-    _renderMap();
+    if (changed) _renderMap();
+    _updateRefreshIndicator("tree");
   }).catch(function(err){
-    canvas.textContent = "Error loading map: " + err.message;
+    if (!silent) canvas.textContent = "Error loading map: " + err.message;
+  });
+}
+
+function _updateRefreshIndicator(kind) {
+  var el = document.getElementById("map-refresh-indicator");
+  if (!el) return;
+  var now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  if (kind === "tree") {
+    el.dataset.lastTree = now;
+  }
+  var act = el.dataset.lastActivity || "—";
+  var tree = el.dataset.lastTree || now;
+  el.textContent = "● " + act + " · ↻ " + tree;
+}
+
+function _mapTabActive() {
+  return document.getElementById("tab-map").classList.contains("active") && !document.hidden;
+}
+
+// ── Activity overlay: 1Hz poll, mutates existing SVG attrs only ─────────────
+function _applyActivityOverlay(activity) {
+  if (!activity) return;
+  var openSet = {};
+  (activity.processes || []).forEach(function(p){
+    (p.open_plans || []).forEach(function(path){ openSet[path] = true; });
+  });
+  var recentSet = {};
+  (activity.recent_mtimes || []).forEach(function(r){ recentSet[r.path] = r.mtime; });
+
+  // Mutate the cached _mapData in place so subsequent re-renders preserve state
+  function walk(node) {
+    if (!node) return;
+    if (node.kind === "plan" && node.path) {
+      node.claude_active = !!openSet[node.path];
+      node.recently_modified = !!recentSet[node.path];
+    }
+    if (node.children) node.children.forEach(walk);
+  }
+  if (_mapData) walk(_mapData);
+
+  // Direct SVG attribute updates (no layout pass, zoom state preserved)
+  // Circle packing nodes
+  d3.selectAll(".cp-node").each(function(d) {
+    if (!d || d.data.kind !== "plan") return;
+    var active = !!openSet[d.data.path];
+    var recent = !!recentSet[d.data.path];
+    d.data.claude_active = active;
+    d.data.recently_modified = recent;
+    var sel = d3.select(this).select("circle");
+    if (active) {
+      sel.attr("stroke", "#ffa657").attr("stroke-width", 2)
+        .style("filter", "drop-shadow(0 0 8px #ffa657)")
+        .attr("fill", "#ffa657");
+    } else if (recent) {
+      sel.attr("stroke", "#58a6ff").attr("stroke-width", 1.5)
+        .style("filter", "drop-shadow(0 0 4px #58a6ff)");
+    } else {
+      sel.attr("stroke", null).attr("stroke-width", 0).style("filter", null);
+    }
+  });
+
+  // Sunburst arcs
+  d3.selectAll(".sb-arc").each(function(d){
+    if (!d || d.data.kind !== "plan") return;
+    var active = !!openSet[d.data.path];
+    d.data.claude_active = active;
+    if (active) {
+      d3.select(this).attr("fill", "#ffa657");
+    }
+  });
+
+  // Update activity indicator
+  var el = document.getElementById("map-refresh-indicator");
+  if (el) {
+    el.dataset.lastActivity = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    _updateRefreshIndicator();
+  }
+}
+
+function _pollActivity() {
+  if (!_mapTabActive()) return;
+  fetch("/api/activity").then(function(r){ return r.json(); }).then(_applyActivityOverlay)
+    .catch(function(){ /* silent */ });
+}
+
+function _startMapAutoRefresh() {
+  if (!_mapTreeRefreshId) {
+    _mapTreeRefreshId = setInterval(function(){
+      if (_mapTabActive()) loadMap(true);
+    }, _MAP_TREE_REFRESH_MS);
+  }
+  if (!_mapActivityRefreshId) {
+    _mapActivityRefreshId = setInterval(_pollActivity, _MAP_ACTIVITY_REFRESH_MS);
+  }
+  _pollActivity();  // fire one immediately so the user sees activity right away
+}
+
+// ── Plan search ─────────────────────────────────────────────────────────────
+function _collectPlanLeaves(node, repo, out) {
+  if (!node) return;
+  if (node.kind === "repo" || node.kind === "worktree") repo = node.name;
+  if (node.kind === "plan" && node.path) {
+    out.push({
+      name: node.name, path: node.path, ext: node.ext || "md",
+      phase: node.phase || null, phase_status: node.phase_status || null,
+      claude_active: !!node.claude_active, repo: repo || ""
+    });
+  }
+  if (node.children) node.children.forEach(function(c){ _collectPlanLeaves(c, repo, out); });
+}
+
+function _renderSearchResults(query) {
+  var el = document.getElementById("map-search-results");
+  if (!_mapData || !query || query.length < 2) {
+    el.hidden = true; el.innerHTML = ""; return;
+  }
+  var all = [];
+  _collectPlanLeaves(_mapData, null, all);
+  var q = query.toLowerCase();
+  var matches = all.filter(function(p){
+    return p.name.toLowerCase().indexOf(q) !== -1 ||
+           (p.repo && p.repo.toLowerCase().indexOf(q) !== -1) ||
+           (p.phase && p.phase.toLowerCase().indexOf(q) !== -1);
+  });
+  // sort: claude_active first, then by repo+name
+  matches.sort(function(a,b){
+    if (a.claude_active !== b.claude_active) return a.claude_active ? -1 : 1;
+    return (a.repo + a.name).localeCompare(b.repo + b.name);
+  });
+  el.hidden = false;
+  if (!matches.length) {
+    el.innerHTML = '<div class="sr-empty">No plan files match "' + q + '"</div>';
+    return;
+  }
+  function highlight(s) {
+    var idx = s.toLowerCase().indexOf(q);
+    if (idx === -1) return s;
+    return s.slice(0, idx) + "<b>" + s.slice(idx, idx + q.length) + "</b>" + s.slice(idx + q.length);
+  }
+  el.innerHTML = matches.slice(0, 50).map(function(p){
+    var status = p.phase_status || "none";
+    return '<div class="sr-row" data-path="' + encodeURIComponent(p.path) + '" data-name="' + p.name + '">' +
+      '<span class="sr-status ' + status + '"></span>' +
+      '<span class="sr-name">' + highlight(p.name) +
+        (p.phase ? ' <span class="sr-repo">· ' + p.phase + '</span>' : '') +
+      '</span>' +
+      '<span class="sr-repo">' + p.repo + '</span>' +
+      (p.claude_active ? '<span class="sr-active">● editing</span>' : '<span class="sr-ext ' + p.ext + '">' + p.ext.toUpperCase() + '</span>') +
+    '</div>';
+  }).join("");
+  el.querySelectorAll(".sr-row").forEach(function(row){
+    row.addEventListener("click", function(){
+      openPlan(decodeURIComponent(row.dataset.path), row.dataset.name);
+    });
   });
 }
 
@@ -526,9 +892,24 @@ document.querySelectorAll(".map-view-btn").forEach(function(btn){
   });
 });
 
-// Lazy-load on first tab open
+// Search wiring (debounced)
+(function(){
+  var input = document.getElementById("map-search");
+  if (!input) return;
+  var to;
+  input.addEventListener("input", function(){
+    clearTimeout(to);
+    to = setTimeout(function(){ _renderSearchResults(input.value.trim()); }, 120);
+  });
+  input.addEventListener("keydown", function(e){
+    if (e.key === "Escape") { input.value = ""; _renderSearchResults(""); input.blur(); }
+  });
+})();
+
+// Lazy-load on first tab open + start auto-refresh
 document.querySelector("[data-tab='map']").addEventListener("click", function(){
   if (!mapLoaded) { loadMap(); mapLoaded = true; }
+  _startMapAutoRefresh();
 });
 
 // Resize
@@ -550,3 +931,122 @@ loadAll = function(){
     mapLoaded = true;
   }
 };
+
+// ── Knowledge Graph tab ─────────────────────────────────────────────────────
+
+var NODE_COLOR = {
+  person:  '#4f86f7',
+  project: '#f77f4f',
+  channel: '#4fc98a',
+  tool:    '#c94fc9',
+};
+
+function loadKnowledge() {
+  var status = document.getElementById('knowledge-status');
+  status.textContent = 'Loading…';
+  fetch('/api/knowledge-graph')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      status.textContent = data.nodes.length + ' nodes · ' + data.links.length + ' links';
+      renderKnowledgeGraph(data);
+    })
+    .catch(function() { status.textContent = 'Failed to load'; });
+}
+
+function renderKnowledgeGraph(graphData) {
+  var nodes = graphData.nodes;
+  var links = graphData.links;
+  var svg = d3.select('#knowledge-svg');
+  svg.selectAll('*').remove();
+
+  var container = document.getElementById('knowledge-canvas');
+  var W = container.clientWidth;
+  var H = container.clientHeight;
+
+  svg.attr('viewBox', '0 0 ' + W + ' ' + H);
+
+  var g = svg.append('g');
+
+  // Zoom + pan
+  svg.call(
+    d3.zoom().scaleExtent([0.2, 4]).on('zoom', function(e) { g.attr('transform', e.transform); })
+  );
+
+  var simulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(function(d) { return d.id; }).distance(120))
+    .force('charge', d3.forceManyBody().strength(-300))
+    .force('center', d3.forceCenter(W / 2, H / 2))
+    .force('collision', d3.forceCollide(30));
+
+  // Edges
+  var link = g.append('g').selectAll('.k-link')
+    .data(links).join('g').attr('class', 'k-link');
+
+  link.append('line');
+
+  link.append('text')
+    .attr('text-anchor', 'middle')
+    .text(function(d) { return d.relation; });
+
+  // Nodes
+  var node = g.append('g').selectAll('.k-node')
+    .data(nodes).join('g').attr('class', 'k-node')
+    .call(
+      d3.drag()
+        .on('start', function(e, d) { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+        .on('drag',  function(e, d) { d.fx = e.x; d.fy = e.y; })
+        .on('end',   function(e, d) { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
+    )
+    .on('click', function(e, d) { showKnowledgeDetail(d); });
+
+  node.append('circle')
+    .attr('r', function(d) { return d.type === 'project' ? 18 : 13; })
+    .attr('fill', function(d) { return NODE_COLOR[d.type] || '#aaa'; });
+
+  node.append('text')
+    .attr('dy', function(d) { return (d.type === 'project' ? 18 : 13) + 12; })
+    .attr('text-anchor', 'middle')
+    .text(function(d) { return d.name.length > 18 ? d.name.slice(0, 16) + '…' : d.name; });
+
+  simulation.on('tick', function() {
+    link.select('line')
+      .attr('x1', function(d) { return d.source.x; }).attr('y1', function(d) { return d.source.y; })
+      .attr('x2', function(d) { return d.target.x; }).attr('y2', function(d) { return d.target.y; });
+    link.select('text')
+      .attr('x', function(d) { return (d.source.x + d.target.x) / 2; })
+      .attr('y', function(d) { return (d.source.y + d.target.y) / 2; });
+    node.attr('transform', function(d) { return 'translate(' + d.x + ',' + d.y + ')'; });
+  });
+}
+
+function showKnowledgeDetail(node) {
+  var panel = document.getElementById('knowledge-detail');
+  var body = document.getElementById('knowledge-detail-body');
+  panel.classList.remove('hidden');
+  var meta = node.metadata || {};
+  var metaRows = Object.keys(meta).map(function(k) {
+    return '<div><b>' + k + ':</b> ' + meta[k] + '</div>';
+  }).join('');
+  body.innerHTML =
+    '<strong>' + node.name + '</strong><br>' +
+    '<span style="color:var(--muted);font-size:11px">' + node.type + '</span><br><br>' +
+    metaRows;
+}
+
+document.getElementById('knowledge-detail-close') &&
+  document.getElementById('knowledge-detail-close').addEventListener('click', function() {
+    document.getElementById('knowledge-detail').classList.add('hidden');
+  });
+
+document.getElementById('knowledge-sync-btn') &&
+  document.getElementById('knowledge-sync-btn').addEventListener('click', function() {
+    var status = document.getElementById('knowledge-status');
+    status.textContent = 'Syncing…';
+    fetch('/api/knowledge/sync', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(d) { status.textContent = 'Synced ' + d.count + ' episodes'; loadKnowledge(); })
+      .catch(function() { status.textContent = 'Sync failed'; });
+  });
+
+document.querySelector("[data-tab='knowledge']") &&
+  document.querySelector("[data-tab='knowledge']").addEventListener('click', loadKnowledge);

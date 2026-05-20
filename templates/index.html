@@ -69,6 +69,7 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
     <button class="tab" data-tab="processes">Processes</button>
     <button class="tab" data-tab="git">Git State</button>
     <button class="tab" data-tab="map">Map</button>
+    <button class="tab" data-tab="knowledge">Knowledge</button>
   </nav>
 
   <section id="tab-context" class="tab-panel active">
@@ -104,17 +105,41 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
         <button class="map-view-btn active" data-view="circles">◉ Circles</button>
         <button class="map-view-btn" data-view="sunburst">◐ Sunburst</button>
       </div>
+      <input id="map-search" type="search" class="map-search" placeholder="search plans…" autocomplete="off">
+      <span id="map-refresh-indicator" class="map-refresh-indicator" title="● = last activity probe (1s) · ↻ = last tree scan (30s)"></span>
       <div class="map-legend">
-        <span><i class="dot dot-complete"></i> complete</span>
-        <span><i class="dot dot-iterating"></i> iterating</span>
-        <span><i class="dot dot-planning"></i> planning</span>
-        <span><i class="dot dot-dirty"></i> dirty</span>
+        <span><i class="dot dot-done"></i> done</span>
+        <span><i class="dot dot-active"></i> active</span>
+        <span><i class="dot dot-idle"></i> needs attention</span>
         <span><i class="dot dot-proc"></i> claude running</span>
+        <span><i class="dot dot-open"></i> claude editing</span>
         <span><i class="dot dot-high"></i> HIGH</span>
       </div>
     </div>
     <div id="map-canvas" class="map-canvas">Click Map tab to load…</div>
-    <p class="map-hint">Click a circle/arc to zoom in · click background or center to zoom out · click any plan file to read it</p>
+    <div id="map-search-results" class="map-search-results" hidden></div>
+    <p class="map-hint">Click a circle/arc to zoom in · click background or center to zoom out · click any plan file to read it · activity probe runs every 1s · full tree rescans every 30s</p>
+  </section>
+
+  <section id="tab-knowledge" class="tab-panel">
+    <div class="knowledge-toolbar">
+      <span class="knowledge-title">Knowledge Graph</span>
+      <button id="knowledge-sync-btn" class="btn-small">Sync Graph</button>
+      <span id="knowledge-status" class="knowledge-status"></span>
+    </div>
+    <div class="knowledge-legend">
+      <span class="legend-dot person">person</span>
+      <span class="legend-dot project">project</span>
+      <span class="legend-dot channel">channel</span>
+      <span class="legend-dot tool">tool</span>
+    </div>
+    <div id="knowledge-canvas" class="knowledge-canvas">
+      <svg id="knowledge-svg" width="100%" height="100%"></svg>
+    </div>
+    <div id="knowledge-detail" class="knowledge-detail hidden">
+      <button id="knowledge-detail-close">✕</button>
+      <div id="knowledge-detail-body"></div>
+    </div>
   </section>
 
   <!-- Plan viewer modal -->
@@ -125,6 +150,17 @@ make the first commit "chore: scaffold". Stop and show me the tree before doing 
         <button class="modal-close" onclick="closePlanModal()">×</button>
       </div>
       <div id="plan-modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Phase detail modal (status + plans + commits) -->
+  <div id="phase-modal-bg" class="modal-bg">
+    <div class="modal phase-modal" onclick="event.stopPropagation()">
+      <div class="modal-head">
+        <span id="phase-modal-title" class="modal-title"></span>
+        <button class="modal-close" onclick="closePhaseModal()">×</button>
+      </div>
+      <div id="phase-modal-body" class="modal-body phase-body"></div>
     </div>
   </div>
 
